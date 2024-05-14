@@ -44,19 +44,16 @@ namespace sgns::upnp
                             [&](const boost::system::error_code& receive_error, size_t bytes_received) {
                                 if (!receive_error) {
                                     std::cout << "Received " << bytes_received << " bytes from " << remote_endpoint << std::endl;
-                                    //auto buffer = std::make_shared<std::vector<char>>(boost::asio::buffers_begin(receive_buffer->data()), boost::asio::buffers_end(receive_buffer->data()));
-                                    ////Copy to a string
-                                    //std::string bufferStr(buffer->begin(), buffer->end());
-                                    //std::cout << "Received data: " << bufferStr << std::endl;
                                     std::string received_data(rx.data(), bytes_received);
                                     auto xmlavail = ParseIGD(received_data);
                                     _socket.close();
                                     if (xmlavail && !_requestingRootDesc)
-                                        GetRootDesc();
+                                        return GetRootDesc();
                                     //std::cout << "Received data: " << received_data << std::endl;
                                 }
                                 else {
                                     std::cerr << "Error receiving data: " << receive_error.message() << std::endl;
+                                    return false;
                                 }
                             });
                     }
@@ -64,6 +61,7 @@ namespace sgns::upnp
                     {
                         // Operation failed
                         std::cerr << "Error sending data: " << error.message() << std::endl;
+                        return false;
                     }
                 });
         }
@@ -118,24 +116,23 @@ namespace sgns::upnp
                 if (!connect_error)
                 {
                     
-                    auto write_buffer = boost::asio::buffer(get_request);
-                    std::cout << "1" << get_request << std::endl;
-                    
+                    auto write_buffer = boost::asio::buffer(get_request);                    
                     boost::asio::async_write(_tcpsocket, write_buffer, [&](const boost::system::error_code& write_error, std::size_t)
                         {
-                            std::cout << "2" << std::endl;
                             //boost::asio::streambuf rootdesc;
                             auto rootdesc = std::make_shared<boost::asio::streambuf>();
                             boost::asio::async_read(_tcpsocket, *rootdesc, boost::asio::transfer_all(), [&, rootdesc](const boost::system::error_code& read_error, std::size_t bytes_transferred)
                                 {
-                                    std::cout << "3" << std::endl;
                                     auto buffer = std::vector<char>(boost::asio::buffers_begin(rootdesc->data()), boost::asio::buffers_end(rootdesc->data()));
                                     std::string bufferStr(buffer.begin(), buffer.end());
                                     auto bodyStartPos = bufferStr.find("\r\n\r\n");
                                     if (bodyStartPos != std::string::npos) {
-
-                                        bufferStr = bufferStr.substr(bodyStartPos + 4);
-                                        ParseRootDesc(bufferStr);
+                                        
+                                        _rootXML = bufferStr.substr(bodyStartPos + 4);
+                                        _tcpsocket.close();
+                                        std::cout << "Here now" << std::endl;
+                                        return true;
+                                        //ParseRootDesc(bufferStr);
                                     }
                                     else {
                                         return false;
@@ -145,9 +142,12 @@ namespace sgns::upnp
                 }
                 else {
                     std::cerr << "Connection error: " << connect_error.message() << std::endl;
+                    return false;
                 }
             });
         _ioc.run();
+        std::cout << "GOt here?" << std::endl;
+        return true;
     }
 
     bool UPNP::ParseURL(const std::string& url, std::string& host, unsigned short& port, std::string& path) {
@@ -204,5 +204,30 @@ namespace sgns::upnp
             // Node not found or conversion error
         }
         return value;
+    }
+
+    bool UPNP::OpenPort(int intPort, int extPort, std::string type)
+    {
+        std::istringstream iss(_rootXML);
+        boost::property_tree::ptree tree;
+        boost::property_tree::read_xml(iss, tree);
+        std::string soap = "<?xml version=\"1.0\"?>"
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
+            "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+            "<s:Body>"
+            "<u:AddPortMapping xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
+            "<NewRemoteHost></NewRemoteHost>"
+            "<NewExternalPort>" + std::to_string(extPort) + "< / NewExternalPort>"
+            "<NewProtocol>" + type + "</NewProtocol>"
+            "<NewInternalPort>" + std::to_string(intPort) + "</NewInternalPort>"
+            "<NewInternalClient>192.168.1.100</NewInternalClient>"
+            "<NewEnabled>1</NewEnabled>"
+            "<NewPortMappingDescription>SGNUS</NewPortMappingDescription>"
+            "<NewLeaseDuration>60</NewLeaseDuration>"
+            "</u:AddPortMapping>"
+            "</s:Body>"
+            "</s:Envelope>";
+        std::cout << "Soap request " << std::endl;
+        return false;
     }
 }

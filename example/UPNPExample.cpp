@@ -3,8 +3,8 @@
 
 
 int main() {
-    // Your program logic here
-    auto upnp = std::make_shared<sgns::upnp::UPNP>(1, 1);
+    auto upnp = std::make_shared<sgns::upnp::UPNP>();
     upnp->GetIGD();
-    return 0; // Return 0 to indicate successful program execution
+    upnp->OpenPort(7777, 7777, "TCP");
+    return 0; 
 }
