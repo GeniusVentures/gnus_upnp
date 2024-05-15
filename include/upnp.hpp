@@ -32,7 +32,7 @@ namespace sgns::upnp
 		bool ParseURL(const std::string& url, std::string& host, unsigned short& port, std::string& path);
 		bool ParseRootDesc(std::string& rootdesc);
 		bool SendSOAPRequest(std::string soaprq);
-		std::string AddHTTPtoSoap(std::string soapxml, std::string path);
+		std::string AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action);
 		boost::optional<std::string> getXMLValue(const boost::property_tree::ptree& tree, const std::string& path);
 		//Vars
 		boost::asio::io_context _ioc;

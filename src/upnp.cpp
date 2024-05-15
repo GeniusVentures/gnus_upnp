@@ -249,13 +249,16 @@ namespace sgns::upnp
             "</s:Body>"
             "</s:Envelope>";
         std::cout << "Soap request " << soap << std::endl;
-        auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"));
+        auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
+            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
+            "#AddPortMapping");
         return SendSOAPRequest(soaprqwithhttp);
     }
 
-    std::string UPNP::AddHTTPtoSoap(std::string soapxml, std::string path)
+    std::string UPNP::AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action)
     {
         std::string httpRequest = "POST " + path + " HTTP/1.1\r\n";
+        httpRequest += "SOAPAction: " + device + action;
         httpRequest += "Host: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
         httpRequest += "Content-Type: text/xml; charset=\"utf-8\"\r\n";
         httpRequest += "Content-Length: " + std::to_string(soapxml.size()) + "\r\n";
