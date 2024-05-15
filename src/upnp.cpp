@@ -50,7 +50,7 @@ namespace sgns::upnp
                                     //std::cout << "Received data: " << bufferStr << std::endl;
                                     std::string received_data(rx.data(), bytes_received);
                                     auto xmlavail = ParseIGD(received_data);
-
+                                    
                                     //if (xmlavail && !_requestingRootDesc)
                                     //    GetRootDesc();
                                     //return true;
@@ -71,6 +71,7 @@ namespace sgns::upnp
         _ioc.run();
         _ioc.stop();
         _ioc.reset();
+        
         _socket.close();
         for (const auto& rootDescXML : _rootDescXML) {
             auto gotrootdesc = GetRootDesc(rootDescXML);
@@ -84,6 +85,7 @@ namespace sgns::upnp
 
     bool UPNP::ParseIGD(std::string& lines)
     {
+        std::cout << "Full IGD: " << lines << std::endl;
         // Define a regex pattern to match the LOCATION header
         std::regex locationRegex(R"(LOCATION:\s*(.*))", std::regex_constants::icase);
 
@@ -112,6 +114,7 @@ namespace sgns::upnp
         {
             return false;
         }
+        
         boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(host), port);
 
         //Connect 
@@ -142,6 +145,10 @@ namespace sgns::upnp
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
                                         _rootDescData = bufferStr;
+                                        //std::cout << "local endpoint test" << _tcpsocket.local_endpoint().address().to_string() << std::endl;
+                                        _controlHost = host;
+                                        _controlPort = port;
+                                        _localIpAddress = _tcpsocket.local_endpoint().address().to_string();
                                         //ParseRootDesc(bufferStr);
                                         gotparse = true;
                                     }
@@ -159,6 +166,7 @@ namespace sgns::upnp
         _ioc.run();
         _ioc.stop();
         _ioc.reset();
+        
         _tcpsocket.close();
         return gotparse;
     }
@@ -226,14 +234,14 @@ namespace sgns::upnp
         boost::property_tree::read_xml(iss, tree);
         std::string soap = "<?xml version=\"1.0\"?>"
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
-            "s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
             "<s:Body>"
             "<u:AddPortMapping xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
             "<NewRemoteHost></NewRemoteHost>"
-            "<NewExternalPort>" + std::to_string(extPort) + "< / NewExternalPort>"
+            "<NewExternalPort>" + std::to_string(extPort) + "</NewExternalPort>"
             "<NewProtocol>" + type + "</NewProtocol>"
             "<NewInternalPort>" + std::to_string(intPort) + "</NewInternalPort>"
-            "<NewInternalClient>192.168.1.100</NewInternalClient>"
+            "<NewInternalClient>" + _localIpAddress + "</NewInternalClient>"
             "<NewEnabled>1</NewEnabled>"
             "<NewPortMappingDescription>SGNUS</NewPortMappingDescription>"
             "<NewLeaseDuration>60</NewLeaseDuration>"
@@ -241,6 +249,59 @@ namespace sgns::upnp
             "</s:Body>"
             "</s:Envelope>";
         std::cout << "Soap request " << soap << std::endl;
-        return false;
+        auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"));
+        return SendSOAPRequest(soaprqwithhttp);
+    }
+
+    std::string UPNP::AddHTTPtoSoap(std::string soapxml, std::string path)
+    {
+        std::string httpRequest = "POST " + path + " HTTP/1.1\r\n";
+        httpRequest += "Host: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
+        httpRequest += "Content-Type: text/xml; charset=\"utf-8\"\r\n";
+        httpRequest += "Content-Length: " + std::to_string(soapxml.size()) + "\r\n";
+        httpRequest += "\r\n"; // End of headers
+        httpRequest += soapxml;
+        return httpRequest;
+    }
+
+    bool UPNP::SendSOAPRequest(std::string soaprq)
+    {
+        std::cout << "Send Soap: " << soaprq << std::endl;
+        boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(_controlHost), _controlPort);
+        _tcpsocket.async_connect(endpoint, [&](const boost::system::error_code& connect_error)
+            {
+                if (!connect_error)
+                {
+                    std::cout << "connected" << std::endl;
+                    auto write_buffer = boost::asio::buffer(soaprq);
+                    boost::asio::async_write(_tcpsocket, write_buffer, [&](const boost::system::error_code& write_error, std::size_t)
+                        {
+                            auto openportb = std::make_shared<boost::asio::streambuf>();
+                            boost::asio::async_read(_tcpsocket, *openportb, boost::asio::transfer_all(), [&, openportb](const boost::system::error_code& read_error, std::size_t bytes_transferred)
+                                {
+                                    auto buffer = std::vector<char>(boost::asio::buffers_begin(openportb->data()), boost::asio::buffers_end(openportb->data()));
+                                    std::string bufferStr(buffer.begin(), buffer.end());
+                                    auto bodyStartPos = bufferStr.find("\r\n\r\n");
+                                    if (bodyStartPos != std::string::npos) {
+
+                                        bufferStr = bufferStr.substr(bodyStartPos + 4);
+                                        std::cout << "Port open test" << bufferStr << std::endl;
+                                    }
+                                    else {
+                                        std::cerr << "Error Reading" << std::endl;
+                                    }
+                                });
+                        });
+                }
+                else {
+                    std::cerr << "Connection error: " << connect_error.message() << std::endl;
+                }
+            });
+        _ioc.run();
+        std::cout << "Send Soap End" << std::endl;
+        _ioc.stop();
+        _ioc.reset();
+        _tcpsocket.close();
+        return true;
     }
 }

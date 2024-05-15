@@ -15,7 +15,7 @@ namespace sgns::upnp
 		UPNP()
 			: _ioc(), _socket(_ioc, boost::asio::ip::udp::v4()),
 			_tcpsocket(_ioc, boost::asio::ip::tcp::v4()), _multicast(boost::asio::ip::address_v4({ 239, 255, 255, 250 }), 1900),
-			_rootDescXML(), _rootDescData()
+			_rootDescXML(), _rootDescData(), _localIpAddress(), _controlHost(""), _controlPort(0)
 		{
 
 		}
@@ -31,6 +31,8 @@ namespace sgns::upnp
 		bool GetRootDesc(std::string xml);
 		bool ParseURL(const std::string& url, std::string& host, unsigned short& port, std::string& path);
 		bool ParseRootDesc(std::string& rootdesc);
+		bool SendSOAPRequest(std::string soaprq);
+		std::string AddHTTPtoSoap(std::string soapxml, std::string path);
 		boost::optional<std::string> getXMLValue(const boost::property_tree::ptree& tree, const std::string& path);
 		//Vars
 		boost::asio::io_context _ioc;
@@ -39,6 +41,9 @@ namespace sgns::upnp
 		const boost::asio::ip::udp::endpoint _multicast;
 		std::vector<std::string> _rootDescXML;
 		std::string _rootDescData;
+		std::string _localIpAddress;
+		std::string _controlHost;
+		int _controlPort;
 	};
 }
 
