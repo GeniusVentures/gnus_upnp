@@ -248,7 +248,7 @@ namespace sgns::upnp
             "</u:AddPortMapping>"
             "</s:Body>"
             "</s:Envelope>";
-        std::cout << "Soap request " << soap << std::endl;
+        //std::cout << "Soap request " << soap << std::endl;
         auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
             tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
             "#AddPortMapping");
@@ -258,7 +258,7 @@ namespace sgns::upnp
     std::string UPNP::AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action)
     {
         std::string httpRequest = "POST " + path + " HTTP/1.1\r\n";
-        httpRequest += "SOAPAction: " + device + action;
+        httpRequest += "SOAPAction: " + device + action + "\r\n";
         httpRequest += "Host: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
         httpRequest += "Content-Type: text/xml; charset=\"utf-8\"\r\n";
         httpRequest += "Content-Length: " + std::to_string(soapxml.size()) + "\r\n";
@@ -288,7 +288,7 @@ namespace sgns::upnp
                                     if (bodyStartPos != std::string::npos) {
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
-                                        std::cout << "Port open test" << bufferStr << std::endl;
+                                        std::cout << "Soap request return" << bufferStr << std::endl;
                                     }
                                     else {
                                         std::cerr << "Error Reading" << std::endl;
@@ -306,5 +306,25 @@ namespace sgns::upnp
         _ioc.reset();
         _tcpsocket.close();
         return true;
+    }
+
+    bool UPNP::GetWanIP()
+    {
+        std::istringstream iss(_rootDescData);
+        boost::property_tree::ptree tree;
+        boost::property_tree::read_xml(iss, tree);
+        std::string soap = "<?xml version=\"1.0\"?>"
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
+            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+            "<s:Body>"
+            "<u:GetExternalIPAddress xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
+            "</u:GetExternalIPAddress>"
+            "</s:Body>"
+            "</s:Envelope>";
+        //std::cout << "Soap request " << soap << std::endl;
+        auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
+            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
+            "#GetExternalIPAddress");
+        return SendSOAPRequest(soaprqwithhttp);
     }
 }
