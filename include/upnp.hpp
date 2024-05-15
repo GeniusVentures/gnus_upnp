@@ -24,14 +24,18 @@ namespace sgns::upnp
 		//Open Port
 		bool OpenPort(int intPort, int extPort, std::string type);
 		//Get Wan IP
-		bool GetWanIP();
+		std::string GetWanIP();
+		//Get local IP
+		std::string GetLocalIP();
+		//List Open Ports
+		void ListOpenPorts();
 
 	private:
 		bool ParseIGD(std::string& lines);
 		bool GetRootDesc(std::string xml);
 		bool ParseURL(const std::string& url, std::string& host, unsigned short& port, std::string& path);
 		bool ParseRootDesc(std::string& rootdesc);
-		bool SendSOAPRequest(std::string soaprq);
+		bool SendSOAPRequest(std::string soaprq, std::string& result);
 		std::string AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action);
 		boost::optional<std::string> getXMLValue(const boost::property_tree::ptree& tree, const std::string& path);
 		//Vars

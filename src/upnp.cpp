@@ -11,11 +11,6 @@ namespace sgns::upnp
         std::array<const char*, 2> search_targets
             = { "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
               , "urn:schemas-upnp-org:device:InternetGatewayDevice:2"
-            //, "urn:schemas-upnp-org:service:WANIPConnection:1"
-            //, "urn:schemas-upnp-org:service:WANIPConnection:2"
-            //, "urn:schemas-upnp-org:service:WANPPPConnection:1"
-            //, "urn:schemas-upnp-org:service:WANPPPConnection:2"
-            //, "upnp:rootdevice"
         };
         for (auto target : search_targets) {
             std::stringstream ss;
@@ -44,17 +39,9 @@ namespace sgns::upnp
                             [&](const boost::system::error_code& receive_error, size_t bytes_received) {
                                 if (!receive_error) {
                                     std::cout << "Received " << bytes_received << " bytes from " << remote_endpoint << std::endl;
-                                    //auto buffer = std::make_shared<std::vector<char>>(boost::asio::buffers_begin(receive_buffer->data()), boost::asio::buffers_end(receive_buffer->data()));
-                                    ////Copy to a string
-                                    //std::string bufferStr(buffer->begin(), buffer->end());
-                                    //std::cout << "Received data: " << bufferStr << std::endl;
+
                                     std::string received_data(rx.data(), bytes_received);
                                     auto xmlavail = ParseIGD(received_data);
-                                    
-                                    //if (xmlavail && !_requestingRootDesc)
-                                    //    GetRootDesc();
-                                    //return true;
-                                    //std::cout << "Received data: " << received_data << std::endl;
                                 }
                                 else {
                                     std::cerr << "Error receiving data: " << receive_error.message() << std::endl;
@@ -229,9 +216,11 @@ namespace sgns::upnp
 
     bool UPNP::OpenPort(int intPort, int extPort, std::string type)
     {
+        //Read XML data
         std::istringstream iss(_rootDescData);
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
+        //Build a SOAP request
         std::string soap = "<?xml version=\"1.0\"?>"
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
             " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
@@ -252,11 +241,32 @@ namespace sgns::upnp
         auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
             tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
             "#AddPortMapping");
-        return SendSOAPRequest(soaprqwithhttp);
+
+        //Send SOAP request
+        std::string soapresponse;
+        SendSOAPRequest(soaprqwithhttp, soapresponse);
+
+        //Parse SOAP request for success
+        std::istringstream soaprespdata(soapresponse);
+        boost::property_tree::ptree soaptree;
+        boost::property_tree::read_xml(soaprespdata, soaptree);
+        try {
+            auto err_check = soaptree.get<std::string>("s:Envelope.s:Body.u:AddPortMappingResponse");
+            return true;
+        }
+        catch (const boost::property_tree::ptree_bad_path& e) {
+            std::cerr << "Property tree path error: " << e.what() << std::endl;
+            return false;
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Exception: " << e.what() << std::endl;
+            return false;
+        }
     }
 
     std::string UPNP::AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action)
     {
+        //Construct a SOAP request with HTTP header for posting
         std::string httpRequest = "POST " + path + " HTTP/1.1\r\n";
         httpRequest += "SOAPAction: " + device + action + "\r\n";
         httpRequest += "Host: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
@@ -267,7 +277,7 @@ namespace sgns::upnp
         return httpRequest;
     }
 
-    bool UPNP::SendSOAPRequest(std::string soaprq)
+    bool UPNP::SendSOAPRequest(std::string soaprq, std::string& result)
     {
         std::cout << "Send Soap: " << soaprq << std::endl;
         boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(_controlHost), _controlPort);
@@ -288,6 +298,7 @@ namespace sgns::upnp
                                     if (bodyStartPos != std::string::npos) {
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
+                                        result = bufferStr;
                                         std::cout << "Soap request return" << bufferStr << std::endl;
                                     }
                                     else {
@@ -308,11 +319,14 @@ namespace sgns::upnp
         return true;
     }
 
-    bool UPNP::GetWanIP()
+    std::string UPNP::GetWanIP()
     {
+        //Read XML data
         std::istringstream iss(_rootDescData);
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
+
+        //Build a SOAP request
         std::string soap = "<?xml version=\"1.0\"?>"
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
             " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
@@ -325,6 +339,33 @@ namespace sgns::upnp
         auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
             tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
             "#GetExternalIPAddress");
-        return SendSOAPRequest(soaprqwithhttp);
+        
+
+        //Send SOAP request
+        std::string soapresponse;
+        SendSOAPRequest(soaprqwithhttp, soapresponse);
+
+        //Parse soap response for WAN IP
+        //std::cout << "Wan IP Response before parse: " << soapresponse << std::endl;
+        std::istringstream soaprespdata(soapresponse);
+        boost::property_tree::ptree soaptree;
+        boost::property_tree::read_xml(soaprespdata, soaptree);
+        try {
+            auto response_ip = soaptree.get<std::string>("s:Envelope.s:Body.u:GetExternalIPAddressResponse.NewExternalIPAddress");
+            return response_ip;
+        }
+        catch (const boost::property_tree::ptree_bad_path& e) {
+            std::cerr << "Property tree path error: " << e.what() << std::endl;
+            return "";
+        }
+        catch (const std::exception& e) {
+            std::cerr << "Exception: " << e.what() << std::endl;
+            return "";
+        }
+    }
+
+    std::string UPNP::GetLocalIP()
+    {
+        return _localIpAddress;
     }
 }
