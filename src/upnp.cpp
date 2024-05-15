@@ -5,8 +5,8 @@
 
 namespace sgns::upnp
 {
-	bool UPNP::GetIGD()
-	{
+    bool UPNP::GetIGD()
+    {
         std::chrono::seconds timeout(2);
         std::array<const char*, 2> search_targets
             = { "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
@@ -44,16 +44,20 @@ namespace sgns::upnp
                             [&](const boost::system::error_code& receive_error, size_t bytes_received) {
                                 if (!receive_error) {
                                     std::cout << "Received " << bytes_received << " bytes from " << remote_endpoint << std::endl;
+                                    //auto buffer = std::make_shared<std::vector<char>>(boost::asio::buffers_begin(receive_buffer->data()), boost::asio::buffers_end(receive_buffer->data()));
+                                    ////Copy to a string
+                                    //std::string bufferStr(buffer->begin(), buffer->end());
+                                    //std::cout << "Received data: " << bufferStr << std::endl;
                                     std::string received_data(rx.data(), bytes_received);
                                     auto xmlavail = ParseIGD(received_data);
-                                    _socket.close();
-                                    if (xmlavail && !_requestingRootDesc)
-                                        return GetRootDesc();
+
+                                    //if (xmlavail && !_requestingRootDesc)
+                                    //    GetRootDesc();
+                                    //return true;
                                     //std::cout << "Received data: " << received_data << std::endl;
                                 }
                                 else {
                                     std::cerr << "Error receiving data: " << receive_error.message() << std::endl;
-                                    return false;
                                 }
                             });
                     }
@@ -61,13 +65,22 @@ namespace sgns::upnp
                     {
                         // Operation failed
                         std::cerr << "Error sending data: " << error.message() << std::endl;
-                        return false;
                     }
                 });
         }
         _ioc.run();
-        return true;
-	}
+        _ioc.stop();
+        _ioc.reset();
+        _socket.close();
+        for (const auto& rootDescXML : _rootDescXML) {
+            auto gotrootdesc = GetRootDesc(rootDescXML);
+            if (gotrootdesc) {
+                std::cout << "Got root desc" << std::endl;
+                return true;
+            }
+        }
+        return false;
+    }
 
     bool UPNP::ParseIGD(std::string& lines)
     {
@@ -78,7 +91,7 @@ namespace sgns::upnp
         std::smatch match;
         if (std::regex_search(lines, match, locationRegex)) {
             // Extract and return the location URL
-            _rootDescXML = match[1].str();
+            _rootDescXML.push_back(match[1].str());
             std::cout << "String Location:" << match[1].str() << std::endl;
             return true;
         }
@@ -89,65 +102,65 @@ namespace sgns::upnp
         }
     }
 
-    bool UPNP::GetRootDesc()
+    bool UPNP::GetRootDesc(std::string xml)
     {
-        if (_requestingRootDesc == true)
-        {
-            std::cerr << "Already getting rootdesc" << std::endl;
-            return false;
-        }
-        _requestingRootDesc = true;
-         //Parse URL to get correct elements for HTTP get and entpoint.
+        //Parse URL to get correct elements for HTTP get and entpoint.
         std::string host;
         unsigned short port;
         std::string path;
-        if (!ParseURL(_rootDescXML, host, port, path))
+        if (!ParseURL(xml, host, port, path))
         {
             return false;
         }
         boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(host), port);
-        
+
         //Connect 
         //TODO: Support HTTPS because some routers use this.
+        bool gotparse = false;
         _ioc.reset();
         std::string get_request = "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n";
         _tcpsocket.async_connect(endpoint, [&](const boost::system::error_code& connect_error)
             {
                 if (!connect_error)
                 {
-                    
-                    auto write_buffer = boost::asio::buffer(get_request);                    
+
+                    auto write_buffer = boost::asio::buffer(get_request);
+                    std::cout << "1" << get_request << std::endl;
+
                     boost::asio::async_write(_tcpsocket, write_buffer, [&](const boost::system::error_code& write_error, std::size_t)
                         {
+                            std::cout << "2" << std::endl;
                             //boost::asio::streambuf rootdesc;
                             auto rootdesc = std::make_shared<boost::asio::streambuf>();
                             boost::asio::async_read(_tcpsocket, *rootdesc, boost::asio::transfer_all(), [&, rootdesc](const boost::system::error_code& read_error, std::size_t bytes_transferred)
                                 {
+                                    std::cout << "3" << std::endl;
                                     auto buffer = std::vector<char>(boost::asio::buffers_begin(rootdesc->data()), boost::asio::buffers_end(rootdesc->data()));
                                     std::string bufferStr(buffer.begin(), buffer.end());
                                     auto bodyStartPos = bufferStr.find("\r\n\r\n");
                                     if (bodyStartPos != std::string::npos) {
-                                        
-                                        _rootXML = bufferStr.substr(bodyStartPos + 4);
-                                        _tcpsocket.close();
-                                        std::cout << "Here now" << std::endl;
-                                        return true;
+
+                                        bufferStr = bufferStr.substr(bodyStartPos + 4);
+                                        _rootDescData = bufferStr;
                                         //ParseRootDesc(bufferStr);
+                                        gotparse = true;
                                     }
                                     else {
-                                        return false;
+                                        gotparse = false;
+                                        std::cerr << "Error Reading" << std::endl;
                                     }
                                 });
                         });
                 }
                 else {
                     std::cerr << "Connection error: " << connect_error.message() << std::endl;
-                    return false;
                 }
             });
         _ioc.run();
-        std::cout << "GOt here?" << std::endl;
-        return true;
+        _ioc.stop();
+        _ioc.reset();
+        _tcpsocket.close();
+        return gotparse;
     }
 
     bool UPNP::ParseURL(const std::string& url, std::string& host, unsigned short& port, std::string& path) {
@@ -208,7 +221,7 @@ namespace sgns::upnp
 
     bool UPNP::OpenPort(int intPort, int extPort, std::string type)
     {
-        std::istringstream iss(_rootXML);
+        std::istringstream iss(_rootDescData);
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
         std::string soap = "<?xml version=\"1.0\"?>"
@@ -227,7 +240,7 @@ namespace sgns::upnp
             "</u:AddPortMapping>"
             "</s:Body>"
             "</s:Envelope>";
-        std::cout << "Soap request " << std::endl;
+        std::cout << "Soap request " << soap << std::endl;
         return false;
     }
 }
