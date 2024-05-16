@@ -214,7 +214,7 @@ namespace sgns::upnp
         return value;
     }
 
-    bool UPNP::OpenPort(int intPort, int extPort, std::string type)
+    bool UPNP::OpenPort(int intPort, int extPort, std::string type, int time)
     {
         //Read XML data
         std::istringstream iss(_rootDescData);
@@ -233,7 +233,7 @@ namespace sgns::upnp
             "<NewInternalClient>" + _localIpAddress + "</NewInternalClient>"
             "<NewEnabled>1</NewEnabled>"
             "<NewPortMappingDescription>SGNUS</NewPortMappingDescription>"
-            "<NewLeaseDuration>60</NewLeaseDuration>"
+            "<NewLeaseDuration>" + std::to_string(time) + "</NewLeaseDuration>"
             "</u:AddPortMapping>"
             "</s:Body>"
             "</s:Envelope>";

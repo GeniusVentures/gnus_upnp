@@ -22,7 +22,7 @@ namespace sgns::upnp
 		//Get IDG
 		bool GetIGD();
 		//Open Port
-		bool OpenPort(int intPort, int extPort, std::string type);
+		bool OpenPort(int intPort, int extPort, std::string type, int time);
 		//Get Wan IP
 		std::string GetWanIP();
 		//Get local IP

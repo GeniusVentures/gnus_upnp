@@ -7,7 +7,7 @@ int main() {
     auto gotIGD = upnp->GetIGD();
     if (gotIGD)
     {
-        auto openedPort = upnp->OpenPort(7777, 7777, "TCP");
+        auto openedPort = upnp->OpenPort(7777, 7777, "TCP", 60);
         auto wanip = upnp->GetWanIP();
         auto lanip = upnp->GetLocalIP();
         std::cout << "Wan IP: " << wanip << std::endl;
