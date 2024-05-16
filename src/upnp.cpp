@@ -39,7 +39,6 @@ namespace sgns::upnp
                             [&](const boost::system::error_code& receive_error, size_t bytes_received) {
                                 if (!receive_error) {
                                     std::cout << "Received " << bytes_received << " bytes from " << remote_endpoint << std::endl;
-
                                     std::string received_data(rx.data(), bytes_received);
                                     auto xmlavail = ParseIGD(received_data);
                                 }
@@ -132,6 +131,7 @@ namespace sgns::upnp
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
                                         _rootDescData = bufferStr;
+                                        std::cout << "Root Description XML: " << _rootDescData << std::endl;
                                         //std::cout << "local endpoint test" << _tcpsocket.local_endpoint().address().to_string() << std::endl;
                                         _controlHost = host;
                                         _controlPort = port;
