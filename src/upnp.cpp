@@ -176,44 +176,6 @@ namespace sgns::upnp
         }
     }
 
-    bool UPNP::ParseRootDesc(std::string& rootdesc)
-    {
-        //std::cout << "Root Desc: " << rootdesc << std::endl;
-        std::istringstream iss(rootdesc);
-        boost::property_tree::ptree tree;
-        boost::property_tree::read_xml(iss, tree);
-        //Get required values to upnp.
-        try {
-            auto deviceType = tree.get<std::string>("root.device.deviceType");
-            auto friendlyName = tree.get<std::string>("root.device.friendlyName");
-            auto manufacturer = tree.get<std::string>("root.device.manufacturer");
-            auto modelDescription = tree.get<std::string>("root.device.modelDescription");
-
-            // Process the retrieved values
-            std::cout << "Device Type: " << deviceType << std::endl;
-            std::cout << "Friendly Name: " << friendlyName << std::endl;
-            std::cout << "Manufacturer: " << manufacturer << std::endl;
-            std::cout << "Model Description: " << modelDescription << std::endl;
-
-        }
-        catch (const boost::property_tree::ptree_bad_path& ex) {
-            std::cerr << "Error: " << ex.what() << std::endl;
-        }
-        std::cout << "Here" << std::endl;
-        return false;
-    }
-
-    boost::optional<std::string> UPNP::getXMLValue(const boost::property_tree::ptree& tree, const std::string& path) {
-        boost::optional<std::string> value;
-        try {
-            value = tree.get<std::string>(path);
-        }
-        catch (const std::exception& ex) {
-            // Node not found or conversion error
-        }
-        return value;
-    }
-
     bool UPNP::OpenPort(int intPort, int extPort, std::string type, int time)
     {
         //Read XML data
