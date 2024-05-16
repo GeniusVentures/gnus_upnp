@@ -271,7 +271,7 @@ namespace sgns::upnp
         httpRequest += "HOST: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
         httpRequest += "CONTENT-TYPE: text/xml; charset=\"utf-8\"\r\n";
         httpRequest += "CONTENT-LENGTH: " + std::to_string(soapxml.size()) + "\r\n";
-        httpRequest += "SOAPACTION: " + device + action + "\r\n";
+        httpRequest += "SOAPACTION: \"" + device + action + "\"\r\n";
         httpRequest += "\r\n"; // End of headers
         httpRequest += soapxml;
         return httpRequest;
