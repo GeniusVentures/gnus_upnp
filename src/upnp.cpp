@@ -268,10 +268,10 @@ namespace sgns::upnp
     {
         //Construct a SOAP request with HTTP header for posting
         std::string httpRequest = "POST " + path + " HTTP/1.1\r\n";
-        httpRequest += "SOAPAction: " + device + action + "\r\n";
-        httpRequest += "Host: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
-        httpRequest += "Content-Type: text/xml; charset=\"utf-8\"\r\n";
-        httpRequest += "Content-Length: " + std::to_string(soapxml.size()) + "\r\n";
+        httpRequest += "HOST: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
+        httpRequest += "CONTENT-TYPE: text/xml; charset=\"utf-8\"\r\n";
+        httpRequest += "CONTENT-LENGTH: " + std::to_string(soapxml.size()) + "\r\n";
+        httpRequest += "SOAPACTION: " + device + action + "\r\n";
         httpRequest += "\r\n"; // End of headers
         httpRequest += soapxml;
         return httpRequest;
