@@ -1,12 +1,11 @@
-add_library(UPNP STATIC
+add_library(gnus_upnp STATIC
     upnp.cpp
-
     )
 include_directories(
 	${PROJECT_SOURCE_DIR}/src
 	)
-target_include_directories(UPNP PRIVATE ${GSL_INCLUDE_DIR}) 
-target_link_libraries(UPNP PRIVATE
+target_include_directories(gnus_upnp PRIVATE ${GSL_INCLUDE_DIR}) 
+target_link_libraries(gnus_upnp PRIVATE
 	${Boost_LIBRARIES}
 )
 	

@@ -1,6 +1,6 @@
 ### async_install should be called right after add_library(target)
-function(async_install target)
-    install(TARGETS ${target} EXPORT asyncTargets
+function(gnus_upnp_install target)
+    install(TARGETS ${target} EXPORT gnus_upnpTargets
         LIBRARY       DESTINATION ${CMAKE_INSTALL_LIBDIR}
         ARCHIVE       DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME       DESTINATION ${CMAKE_INSTALL_BINDIR}
