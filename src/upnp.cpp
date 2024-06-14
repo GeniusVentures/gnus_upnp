@@ -195,7 +195,7 @@ namespace sgns::upnp
             });
         std::cout << "Run Root Desc" << std::endl;
         _ioc->run();
-        //_ioc.stop();
+        _ioc->stop();
         std::cout << "Root Desc Done" << std::endl;
         _ioc->reset();
         
@@ -330,7 +330,7 @@ namespace sgns::upnp
             });
         _ioc->run();
         std::cout << "Send Soap End" << std::endl;
-        //_ioc->stop();
+        _ioc->stop();
         _ioc->reset();
         tcpsocket->close();
         return true;
