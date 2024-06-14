@@ -5,71 +5,99 @@
 
 namespace sgns::upnp
 {
-    bool UPNP::GetIGD()
-    {
+    bool UPNP::GetIGD() {
         std::chrono::seconds timeout(2);
-        std::array<const char*, 2> search_targets
-            = { "urn:schemas-upnp-org:device:InternetGatewayDevice:1"
-              , "urn:schemas-upnp-org:device:InternetGatewayDevice:2"
+        std::array<const char*, 2> search_targets = {
+            "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
+            "urn:schemas-upnp-org:device:InternetGatewayDevice:2"
         };
-        for (auto target : search_targets) {
-            std::stringstream ss;
-            ss << "M-SEARCH * HTTP/1.1\r\n"
-                << "HOST: " << _multicast << "\r\n"
-                << "ST: " << target << "\r\n"
-                << "MAN: \"ssdp:discover\"\r\n"
-                << "MX: " << timeout.count() << "\r\n"
-                << "USER-AGENT: asio-upnp/1.0\r\n"
-                << "\r\n";
-            auto sss = ss.str();
-            _socket.async_send_to(boost::asio::buffer(sss.data(), sss.size()), _multicast, [&](const boost::system::error_code& error, size_t bytes)
-                {
-                    std::cout << "Sent to" << std::endl;
-                    if (!error)
-                    {
-                        std::array<char, 32 * 1024> rx;
-                        boost::asio::mutable_buffer receive_buffer(rx.data(), rx.size());
 
-                        boost::asio::ip::udp::endpoint remote_endpoint;
+        boost::asio::ip::udp::socket socket(*_ioc);
 
-                        // Operation succeeded
-                        std::cout << "Sent " << bytes << " bytes to the multicast endpoint." << std::endl;
-                        // Now wait for a response
-                        _socket.async_receive_from(receive_buffer, remote_endpoint,
-                            [&](const boost::system::error_code& receive_error, size_t bytes_received) {
-                                if (!receive_error) {
-                                    std::cout << "Received " << bytes_received << " bytes from " << remote_endpoint << std::endl;
-                                    std::string received_data(rx.data(), bytes_received);
-                                    auto xmlavail = ParseIGD(received_data);
+        boost::asio::ip::udp::resolver resolver(*_ioc);
+        boost::asio::ip::udp::resolver::query query(boost::asio::ip::udp::v4(), boost::asio::ip::host_name(), "");
+
+        // Iterate over each resolved endpoint
+        for (auto endpoint_it = resolver.resolve(query); endpoint_it != boost::asio::ip::udp::resolver::iterator(); ++endpoint_it) {
+            boost::asio::ip::udp::endpoint local_endpoint(*endpoint_it);
+
+            // Open socket and bind to local endpoint
+            socket.open(boost::asio::ip::udp::v4());
+            socket.bind(local_endpoint);
+
+            // Send M-SEARCH request for each search target
+            for (auto target : search_targets) {
+                std::stringstream ss;
+                ss << "M-SEARCH * HTTP/1.1\r\n"
+                    << "HOST: 239.255.255.250:1900\r\n"  // Multicast address and port
+                    << "ST: " << target << "\r\n"
+                    << "MAN: \"ssdp:discover\"\r\n"
+                    << "MX: " << timeout.count() << "\r\n"
+                    << "USER-AGENT: asio-upnp/1.0\r\n"
+                    << "\r\n";
+                std::string request = ss.str();
+
+                socket.async_send_to(boost::asio::buffer(request.data(), request.size()), _multicast,
+                    [=, &socket](const boost::system::error_code& error, size_t bytes_sent) {
+                        if (!error) {
+                            //std::array<char, 32 * 1024> rx;
+                            //boost::asio::mutable_buffer receive_buffer(rx.data(), rx.size());
+                            auto headerbuff = std::make_shared<boost::asio::streambuf>();
+
+                            boost::asio::ip::udp::endpoint remote_endpoint;
+                            socket.async_receive_from(headerbuff->prepare(1024), remote_endpoint,
+                                [=, &socket](const boost::system::error_code& receive_error, size_t bytes_received) {
+                                    if (!receive_error) {
+                                        headerbuff->commit(bytes_received);
+                                        auto buffer = std::make_shared<std::vector<char>>(boost::asio::buffers_begin(headerbuff->data()), boost::asio::buffers_end(headerbuff->data()));
+                                        std::string received_data(buffer->begin(), buffer->end());
+                                        std::cout << "Rec Data: " << received_data << std::endl;
+                                        auto xmlavail = this->ParseIGD(local_endpoint.address().to_string(),received_data);
+                                    }
+                                    else {
+                                        std::cerr << "Error receiving data: " << receive_error.message() << std::endl;
+                                    }
+                                });
+
+                            // Create and start a timer for timeout
+                            boost::asio::deadline_timer timer(*_ioc);
+                            timer.expires_from_now(boost::posix_time::seconds(1)); 
+                            timer.async_wait([&](const boost::system::error_code& timer_error) {
+                                if (timer_error == boost::asio::error::operation_aborted) {
+                                    // Timer was cancelled due to successful completion
                                 }
                                 else {
-                                    std::cerr << "Error receiving data: " << receive_error.message() << std::endl;
+                                    // Timer expired, handle timeout
+                                    socket.cancel();
+                                    std::cerr << "Async operation timed out." << std::endl;
                                 }
-                            });
-                    }
-                    else
-                    {
-                        // Operation failed
-                        std::cerr << "Error sending data: " << error.message() << std::endl;
-                    }
-                });
+                                });
+                        }
+                        else {
+                            std::cerr << "Error sending data: " << error.message() << std::endl;
+                        }
+                    });
+            }
+            _ioc->run();
+            //_ioc->stop();
+            socket.close();
         }
-        _ioc.run();
-        _ioc.stop();
-        _ioc.reset();
-        
-        _socket.close();
-        for (const auto& rootDescXML : _rootDescXML) {
+
+        //socket.close();
+        //_ioc->stop();
+
+        for (const auto& rootDescXML : *_rootDescXML) {
             auto gotrootdesc = GetRootDesc(rootDescXML);
             if (gotrootdesc) {
                 std::cout << "Got root desc" << std::endl;
                 return true;
             }
         }
+
         return false;
     }
 
-    bool UPNP::ParseIGD(std::string& lines)
+    bool UPNP::ParseIGD(std::string ip, std::string lines)
     {
         std::cout << "Full IGD: " << lines << std::endl;
         // Define a regex pattern to match the LOCATION header
@@ -79,7 +107,10 @@ namespace sgns::upnp
         std::smatch match;
         if (std::regex_search(lines, match, locationRegex)) {
             // Extract and return the location URL
-            _rootDescXML.push_back(match[1].str());
+            IGDInfo info;
+            info.ipAddress = ip;
+            info.rootDescXML = match[1].str();
+            _rootDescXML->push_back(info);
             std::cout << "String Location:" << match[1].str() << std::endl;
             return true;
         }
@@ -90,13 +121,13 @@ namespace sgns::upnp
         }
     }
 
-    bool UPNP::GetRootDesc(std::string xml)
+    bool UPNP::GetRootDesc(IGDInfo xml)
     {
         //Parse URL to get correct elements for HTTP get and entpoint.
         std::string host;
         unsigned short port;
         std::string path;
-        if (!ParseURL(xml, host, port, path))
+        if (!ParseURL(xml.rootDescXML, host, port, path))
         {
             return false;
         }
@@ -106,9 +137,12 @@ namespace sgns::upnp
         //Connect 
         //TODO: Support HTTPS because some routers use this.
         bool gotparse = false;
-        _ioc.reset();
+        //_ioc->reset();
+        boost::asio::ip::tcp::endpoint tcp_endpoint(boost::asio::ip::make_address(xml.ipAddress), 0);
+        _tcpsocket->open(boost::asio::ip::tcp::v4());
+        _tcpsocket->bind(tcp_endpoint);
         std::string get_request = "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n";
-        _tcpsocket.async_connect(endpoint, [&](const boost::system::error_code& connect_error)
+        _tcpsocket->async_connect(endpoint, [=, &gotparse](const boost::system::error_code& connect_error)
             {
                 if (!connect_error)
                 {
@@ -116,12 +150,12 @@ namespace sgns::upnp
                     auto write_buffer = boost::asio::buffer(get_request);
                     std::cout << "1" << get_request << std::endl;
 
-                    boost::asio::async_write(_tcpsocket, write_buffer, [&](const boost::system::error_code& write_error, std::size_t)
+                    boost::asio::async_write(*_tcpsocket, write_buffer, [=, &gotparse](const boost::system::error_code& write_error, std::size_t)
                         {
                             std::cout << "2" << std::endl;
                             //boost::asio::streambuf rootdesc;
                             auto rootdesc = std::make_shared<boost::asio::streambuf>();
-                            boost::asio::async_read(_tcpsocket, *rootdesc, boost::asio::transfer_all(), [&, rootdesc](const boost::system::error_code& read_error, std::size_t bytes_transferred)
+                            boost::asio::async_read(*_tcpsocket, *rootdesc, boost::asio::transfer_all(), [=, &rootdesc, &gotparse](const boost::system::error_code& read_error, std::size_t bytes_transferred)
                                 {
                                     std::cout << "3" << std::endl;
                                     auto buffer = std::vector<char>(boost::asio::buffers_begin(rootdesc->data()), boost::asio::buffers_end(rootdesc->data()));
@@ -130,12 +164,12 @@ namespace sgns::upnp
                                     if (bodyStartPos != std::string::npos) {
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
-                                        _rootDescData = bufferStr;
+                                        *_rootDescData = bufferStr;
                                         std::cout << "Root Description XML: " << _rootDescData << std::endl;
                                         //std::cout << "local endpoint test" << _tcpsocket.local_endpoint().address().to_string() << std::endl;
                                         _controlHost = host;
                                         _controlPort = port;
-                                        _localIpAddress = _tcpsocket.local_endpoint().address().to_string();
+                                        _localIpAddress = _tcpsocket->local_endpoint().address().to_string();
                                         //ParseRootDesc(bufferStr);
                                         gotparse = true;
                                     }
@@ -150,11 +184,11 @@ namespace sgns::upnp
                     std::cerr << "Connection error: " << connect_error.message() << std::endl;
                 }
             });
-        _ioc.run();
-        _ioc.stop();
-        _ioc.reset();
+        _ioc->run();
+        //_ioc.stop();
+        //_ioc->reset();
         
-        _tcpsocket.close();
+        _tcpsocket->close();
         return gotparse;
     }
 
@@ -179,7 +213,7 @@ namespace sgns::upnp
     bool UPNP::OpenPort(int intPort, int extPort, std::string type, int time)
     {
         //Read XML data
-        std::istringstream iss(_rootDescData);
+        std::istringstream iss(*_rootDescData);
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
         //Build a SOAP request
@@ -243,16 +277,16 @@ namespace sgns::upnp
     {
         std::cout << "Send Soap: " << soaprq << std::endl;
         boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(_controlHost), _controlPort);
-        _tcpsocket.async_connect(endpoint, [&](const boost::system::error_code& connect_error)
+        _tcpsocket->async_connect(endpoint, [&](const boost::system::error_code& connect_error)
             {
                 if (!connect_error)
                 {
                     std::cout << "connected" << std::endl;
                     auto write_buffer = boost::asio::buffer(soaprq);
-                    boost::asio::async_write(_tcpsocket, write_buffer, [&](const boost::system::error_code& write_error, std::size_t)
+                    boost::asio::async_write(*_tcpsocket, write_buffer, [&](const boost::system::error_code& write_error, std::size_t)
                         {
                             auto openportb = std::make_shared<boost::asio::streambuf>();
-                            boost::asio::async_read(_tcpsocket, *openportb, boost::asio::transfer_all(), [&, openportb](const boost::system::error_code& read_error, std::size_t bytes_transferred)
+                            boost::asio::async_read(*_tcpsocket, *openportb, boost::asio::transfer_all(), [&, openportb](const boost::system::error_code& read_error, std::size_t bytes_transferred)
                                 {
                                     auto buffer = std::vector<char>(boost::asio::buffers_begin(openportb->data()), boost::asio::buffers_end(openportb->data()));
                                     std::string bufferStr(buffer.begin(), buffer.end());
@@ -273,18 +307,18 @@ namespace sgns::upnp
                     std::cerr << "Connection error: " << connect_error.message() << std::endl;
                 }
             });
-        _ioc.run();
+        _ioc->run();
         std::cout << "Send Soap End" << std::endl;
-        _ioc.stop();
-        _ioc.reset();
-        _tcpsocket.close();
+        _ioc->stop();
+        _ioc->reset();
+        _tcpsocket->close();
         return true;
     }
 
     std::string UPNP::GetWanIP()
     {
         //Read XML data
-        std::istringstream iss(_rootDescData);
+        std::istringstream iss(*_rootDescData);
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
 

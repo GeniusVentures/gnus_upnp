@@ -18,12 +18,23 @@ namespace sgns::upnp
 	{
 	public:
 		UPNP()
-			: _ioc(), _socket(_ioc, boost::asio::ip::udp::v4()),
-			_tcpsocket(_ioc, boost::asio::ip::tcp::v4()), _multicast(boost::asio::ip::address_v4({ 239, 255, 255, 250 }), 1900),
-			_rootDescXML(), _rootDescData(), _localIpAddress(), _controlHost(""), _controlPort(0)
+			:
+			_ioc(std::make_shared<boost::asio::io_context>()),
+			_tcpsocket(std::make_shared<boost::asio::ip::tcp::socket>(*_ioc)),
+			_multicast(boost::asio::ip::address_v4({ 239, 255, 255, 250 }), 1900),
+			_rootDescXML(std::make_shared<std::vector<IGDInfo>>()),
+			_rootDescData(std::make_shared<std::string>()),
+			_localIpAddress(),
+			_controlHost(""),
+			_controlPort(0)
 		{
 
 		}
+
+		struct IGDInfo {
+			std::string ipAddress;
+			std::string rootDescXML;
+		};
 		/** Get IGD(Internet Gateway Device -- Router) info for future use
 		* @return false on failure
 		*/
@@ -53,12 +64,12 @@ namespace sgns::upnp
 		* @param lines - var to store XML URL
 		* @return false on failure
 		*/
-		bool ParseIGD(std::string& lines);
+		bool ParseIGD(std::string ip, std::string lines);
 		/** Get the rootDesc.xml from the router, which describes devices and other data we need to interact with the router.
 		* @param xml - rootDesc.xml URL
 		* @return false on failure
 		*/
-		bool GetRootDesc(std::string xml);
+		bool GetRootDesc(IGDInfo xml);
 		/** Parse URL for a host, port, and path
 		* @param url - URL to parse
 		* @param host - host name
@@ -83,12 +94,11 @@ namespace sgns::upnp
 		std::string AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action);
 
 		//Vars
-		boost::asio::io_context _ioc;
-		boost::asio::ip::udp::socket _socket;
-		boost::asio::ip::tcp::socket _tcpsocket;
+		std::shared_ptr<boost::asio::io_context> _ioc;
+		std::shared_ptr<boost::asio::ip::tcp::socket> _tcpsocket;
 		const boost::asio::ip::udp::endpoint _multicast;
-		std::vector<std::string> _rootDescXML;
-		std::string _rootDescData;
+		std::shared_ptr<std::vector<IGDInfo>> _rootDescXML;
+		std::shared_ptr<std::string> _rootDescData;
 		std::string _localIpAddress;
 		std::string _controlHost;
 		int _controlPort;
