@@ -14,17 +14,18 @@
 namespace sgns::upnp
 {
 
-	class UPNP 
+	class UPNP : public std::enable_shared_from_this<UPNP>
 	{
 	public:
 		UPNP()
 			:
 			_ioc(std::make_shared<boost::asio::io_context>()),
-			_tcpsocket(std::make_shared<boost::asio::ip::tcp::socket>(*_ioc)),
+			_ioc2(std::make_shared<boost::asio::io_context>()),
 			_multicast(boost::asio::ip::address_v4({ 239, 255, 255, 250 }), 1900),
 			_rootDescXML(std::make_shared<std::vector<IGDInfo>>()),
 			_rootDescData(std::make_shared<std::string>()),
-			_localIpAddress(),
+			_bindIp(std::make_shared<std::string>()),
+			_localIpAddress(""),
 			_controlHost(""),
 			_controlPort(0)
 		{
@@ -95,10 +96,11 @@ namespace sgns::upnp
 
 		//Vars
 		std::shared_ptr<boost::asio::io_context> _ioc;
-		std::shared_ptr<boost::asio::ip::tcp::socket> _tcpsocket;
+		std::shared_ptr<boost::asio::io_context> _ioc2;
 		const boost::asio::ip::udp::endpoint _multicast;
 		std::shared_ptr<std::vector<IGDInfo>> _rootDescXML;
 		std::shared_ptr<std::string> _rootDescData;
+		std::shared_ptr<std::string> _bindIp;
 		std::string _localIpAddress;
 		std::string _controlHost;
 		int _controlPort;
