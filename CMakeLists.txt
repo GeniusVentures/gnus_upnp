@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5.1)
+cmake_minimum_required(VERSION 3.20)
 set(
     CMAKE_TOOLCHAIN_FILE
     "${CMAKE_SOURCE_DIR}/cmake/toolchain/cxx17.cmake"
@@ -22,7 +22,7 @@ include(cmake/functions.cmake)
 # find_package(yaml-cpp CONFIG REQUIRED)
 # find_package(tsl_hat_trie CONFIG REQUIRED)
 # find_package(Boost.DI CONFIG REQUIRED)
-find_package(Boost REQUIRED COMPONENTS date_time filesystem random regex system thread log log_setup program_options)
+find_package(Boost REQUIRED COMPONENTS date_time filesystem random regex system thread log program_options)
 include_directories(${Boost_INCLUDE_DIRS})
 
 # ---------------------------
