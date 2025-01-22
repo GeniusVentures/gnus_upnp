@@ -66,7 +66,7 @@ namespace sgns::upnp
                 boost::asio::deadline_timer timer(*_ioc);
                 timer.expires_from_now(boost::posix_time::milliseconds(200));
                 timer.async_wait([&](const boost::system::error_code& timer_error) {
-                    std::cout << timer_error.message() << std::endl;
+                    //std::cout << timer_error.message() << std::endl;
                     if (timer_error == boost::asio::error::operation_aborted) {
                         // Timer was cancelled due to successful completion
                         std::cerr << "Timer Cancelled Normally" << std::endl;
@@ -83,7 +83,7 @@ namespace sgns::upnp
                 
             }
             socket.close();
-            std::cout << "End Req" << std::endl;
+            //std::cout << "End Req" << std::endl;
         }
 
         //socket.close();
@@ -92,7 +92,7 @@ namespace sgns::upnp
         for (const auto& rootDescXML : *_rootDescXML) {
             auto gotrootdesc = GetRootDesc(rootDescXML);
             if (gotrootdesc) {
-                std::cout << "Got root desc" << std::endl;
+                //std::cout << "Got root desc" << std::endl;
                 return true;
             }
         }
@@ -102,7 +102,7 @@ namespace sgns::upnp
 
     bool UPNP::ParseIGD(std::string ip, std::string lines)
     {
-        std::cout << "Full IGD: " << lines << std::endl;
+        //std::cout << "Full IGD: " << lines << std::endl;
         // Define a regex pattern to match the LOCATION header
         std::regex locationRegex(R"(LOCATION:\s*(.*))", std::regex_constants::icase);
 
@@ -114,12 +114,12 @@ namespace sgns::upnp
             info.ipAddress = ip;
             info.rootDescXML = match[1].str();
             _rootDescXML->push_back(info);
-            std::cout << "String Location:" << match[1].str() << std::endl;
+            //std::cout << "String Location:" << match[1].str() << std::endl;
             return true;
         }
         else {
             // No LOCATION header found
-            std::cout << "No header found" << std::endl;
+            //std::cout << "No header found" << std::endl;
             return false;
         }
     }
@@ -135,7 +135,7 @@ namespace sgns::upnp
         {
             return false;
         }
-        std::cout << "getrootdesc" << std::endl;
+        //std::cout << "getrootdesc" << std::endl;
         boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(host), port);
 
         auto self = shared_from_this();
@@ -145,7 +145,7 @@ namespace sgns::upnp
         //bool gotparse = false;
         auto gotparse = std::make_shared<bool>(false);
         //_ioc->reset();
-        std::cout << "XML ADDR: " << xml.ipAddress << std::endl;
+        //std::cout << "XML ADDR: " << xml.ipAddress << std::endl;
         boost::asio::ip::tcp::endpoint tcp_endpoint(boost::asio::ip::make_address(xml.ipAddress), 0);
         *_bindIp = xml.ipAddress;
         auto tcpsocket = std::make_shared<boost::asio::ip::tcp::socket>(*_ioc);
@@ -161,12 +161,12 @@ namespace sgns::upnp
                     //std::cout << "1" << get_request << std::endl;
                     boost::asio::async_write(*tcpsocket, write_buffer, [self, tcpsocket, gotparse, host, port, write_buffer](const boost::system::error_code& write_error, std::size_t)
                         {
-                            std::cout << "2" << std::endl;
+                            //std::cout << "2" << std::endl;
                             //boost::asio::streambuf rootdesc;
                             auto rootdesc = std::make_shared<boost::asio::streambuf>();
                             boost::asio::async_read(*tcpsocket, *rootdesc, boost::asio::transfer_all(), [self, tcpsocket, gotparse, rootdesc, host, port](const boost::system::error_code& read_error, std::size_t bytes_transferred)
                                 {
-                                    std::cout << "3" << std::endl;
+                                    //std::cout << "3" << std::endl;
                                     auto buffer = std::vector<char>(boost::asio::buffers_begin(rootdesc->data()), boost::asio::buffers_end(rootdesc->data()));
                                     std::string bufferStr(buffer.begin(), buffer.end());
                                     auto bodyStartPos = bufferStr.find("\r\n\r\n");
@@ -174,7 +174,7 @@ namespace sgns::upnp
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
                                         *self->_rootDescData = bufferStr;
-                                        std::cout << "Root Description XML: " << self->_rootDescData << std::endl;
+                                        //std::cout << "Root Description XML: " << self->_rootDescData << std::endl;
                                         //std::cout << "local endpoint test" << _tcpsocket.local_endpoint().address().to_string() << std::endl;
                                         self->_controlHost = host;
                                         self->_controlPort = port;
@@ -193,10 +193,10 @@ namespace sgns::upnp
                     std::cerr << "Connection error: " << connect_error.message() << std::endl;
                 }
             });
-        std::cout << "Run Root Desc" << std::endl;
+        //std::cout << "Run Root Desc" << std::endl;
         _ioc->run();
         _ioc->stop();
-        std::cout << "Root Desc Done" << std::endl;
+        //std::cout << "Root Desc Done" << std::endl;
         _ioc->reset();
         
         tcpsocket->close();
@@ -286,7 +286,7 @@ namespace sgns::upnp
 
     bool UPNP::SendSOAPRequest(std::string soaprq, std::string& result)
     {
-        std::cout << "Send Soap: " << soaprq << std::endl;
+        //std::cout << "Send Soap: " << soaprq << std::endl;
         auto self = shared_from_this();
         //Get Router IP
         boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::address::from_string(_controlHost), _controlPort);
@@ -302,7 +302,7 @@ namespace sgns::upnp
             {
                 if (!connect_error)
                 {
-                    std::cout << "connected" << std::endl;
+                    //std::cout << "connected" << std::endl;
                     
                     boost::asio::async_write(*tcpsocket, write_buffer, [self, tcpsocket, write_buffer, &result](const boost::system::error_code& write_error, std::size_t)
                         {
@@ -316,7 +316,7 @@ namespace sgns::upnp
 
                                         bufferStr = bufferStr.substr(bodyStartPos + 4);
                                         result = bufferStr;
-                                        std::cout << "Soap request return" << bufferStr << std::endl;
+                                        //std::cout << "Soap request return" << bufferStr << std::endl;
                                     }
                                     else {
                                         std::cerr << "Error Reading" << std::endl;
@@ -329,7 +329,7 @@ namespace sgns::upnp
                 }
             });
         _ioc->run();
-        std::cout << "Send Soap End" << std::endl;
+        //std::cout << "Send Soap End" << std::endl;
         _ioc->stop();
         _ioc->reset();
         tcpsocket->close();
