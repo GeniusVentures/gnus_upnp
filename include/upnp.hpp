@@ -103,6 +103,7 @@ namespace sgns::upnp
 		std::shared_ptr<std::string> _bindIp;
 		std::string _localIpAddress;
 		std::string _controlHost;
+		std::mutex upnp_mutex;
 		int _controlPort;
 	};
 }

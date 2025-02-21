@@ -2,10 +2,86 @@
 #include <iostream>
 #include <string>
 #include <regex>
+#if defined(_WIN32)
+#include <winsock2.h>
+#include <iphlpapi.h>
+#pragma comment(lib, "iphlpapi.lib")
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#endif
 
 namespace sgns::upnp
 {
+    std::string GetLocalIPFromOS() {
+#if defined(_WIN32)
+        ULONG bufferSize = 15000;
+        IP_ADAPTER_ADDRESSES* adapterAddresses = (IP_ADAPTER_ADDRESSES*)malloc(bufferSize);
+
+        if (GetAdaptersAddresses(AF_INET, 0, nullptr, adapterAddresses, &bufferSize) == ERROR_BUFFER_OVERFLOW) {
+            free(adapterAddresses);
+            adapterAddresses = (IP_ADAPTER_ADDRESSES*)malloc(bufferSize);
+        }
+
+        std::string localIP = "";  // Start with an empty string
+
+        if (GetAdaptersAddresses(AF_INET, 0, nullptr, adapterAddresses, &bufferSize) == NO_ERROR) {
+            for (IP_ADAPTER_ADDRESSES* adapter = adapterAddresses; adapter; adapter = adapter->Next) {
+                if (adapter->OperStatus == IfOperStatusUp && adapter->IfType != IF_TYPE_SOFTWARE_LOOPBACK) {
+                    for (IP_ADAPTER_UNICAST_ADDRESS* unicast = adapter->FirstUnicastAddress; unicast; unicast = unicast->Next) {
+                        SOCKADDR* addrStruct = unicast->Address.lpSockaddr;
+                        if (addrStruct->sa_family == AF_INET) { // Ensure it's IPv4
+                            char buffer[INET_ADDRSTRLEN];
+                            inet_ntop(AF_INET, &(((struct sockaddr_in*)addrStruct)->sin_addr), buffer, INET_ADDRSTRLEN);
+                            localIP = buffer;
+
+                            // Ensure it's not a loopback IP (127.x.x.x)
+                            if (localIP.rfind("127.", 0) != 0) {
+                                free(adapterAddresses);
+                                return localIP;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        free(adapterAddresses);
+        return localIP;  // Return the best found address or empty if none were valid
+
+#else  // Unix-like (Linux/macOS)
+        struct ifaddrs* ifaddr, * ifa;
+        std::string localIP = "";
+
+        if (getifaddrs(&ifaddr) == -1) {
+            perror("getifaddrs");
+            return localIP;
+        }
+
+        for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+            if (ifa->ifa_addr == nullptr) continue;
+
+            int family = ifa->ifa_addr->sa_family;
+            if (family == AF_INET && !(ifa->ifa_flags & IFF_LOOPBACK)) {
+                char host[NI_MAXHOST];
+                int s = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), host, NI_MAXHOST, nullptr, 0, NI_NUMERICHOST);
+                if (s == 0) {
+                    localIP = host;
+                    break;  // Return the first valid non-loopback IPv4 address
+                }
+            }
+        }
+
+        freeifaddrs(ifaddr);
+        return localIP;  // Return the best found address or empty if none were valid
+#endif
+    }
+
     bool UPNP::GetIGD() {
+        std::lock_guard<std::mutex> lock(upnp_mutex);
+
         std::chrono::seconds timeout(2);
         std::array<const char*, 2> search_targets = {
             "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
@@ -14,17 +90,29 @@ namespace sgns::upnp
         auto self = shared_from_this();
         boost::asio::ip::udp::socket socket(*_ioc);
 
-        boost::asio::ip::udp::resolver resolver(*_ioc);
-        boost::asio::ip::udp::resolver::query query(boost::asio::ip::udp::v4(), boost::asio::ip::host_name(), "");
-
+        //boost::asio::ip::udp::resolver resolver(*_ioc);
+        //boost::asio::ip::udp::resolver::query query(boost::asio::ip::udp::v4(), boost::asio::ip::host_name(), "");
+        std::string local_ip = GetLocalIPFromOS();
+        if (local_ip.empty()) {
+            return false;
+        }
         // Iterate over each resolved endpoint
-        for (auto endpoint_it = resolver.resolve(query); endpoint_it != boost::asio::ip::udp::resolver::iterator(); ++endpoint_it) {
-            boost::asio::ip::udp::endpoint local_endpoint(*endpoint_it);
+        //for (auto endpoint_it = resolver.resolve(query); endpoint_it != boost::asio::ip::udp::resolver::iterator(); ++endpoint_it) {
+            //boost::asio::ip::udp::endpoint local_endpoint(boost::asio::ip::address_v4::any(), 0);
+        boost::asio::ip::udp::endpoint local_endpoint(boost::asio::ip::make_address(local_ip), 0);
+        try {
+            
+            //boost::asio::ip::udp::endpoint local_endpoint(*endpoint_it);
 
             // Open socket and bind to local endpoint
             socket.open(boost::asio::ip::udp::v4());
+            boost::asio::socket_base::reuse_address reuseAddr(true);
+            socket.set_option(reuseAddr);
             socket.bind(local_endpoint);
-
+        }
+        catch (const boost::system::system_error& e) {
+            std::cerr << "Failed to bind to " << local_ip << ": " << e.what() << std::endl;
+        }
             // Send M-SEARCH request for each search target
             for (auto target : search_targets) {
                 std::stringstream ss;
@@ -84,7 +172,7 @@ namespace sgns::upnp
             }
             socket.close();
             //std::cout << "End Req" << std::endl;
-        }
+        //}
 
         //socket.close();
         _ioc->stop();
