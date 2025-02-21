@@ -40,6 +40,13 @@ set(fmt_INCLUDE_DIR "${_THIRDPARTY_BUILD_DIR}/fmt/include")
 find_package(fmt CONFIG REQUIRED)
 include_directories(${fmt_INCLUDE_DIR})
 
+# spdlog v1.4.2
+set(spdlog_DIR "${_THIRDPARTY_BUILD_DIR}/spdlog/lib/cmake/spdlog")
+set(spdlog_INCLUDE_DIR "${_THIRDPARTY_BUILD_DIR}/spdlog/include")
+find_package(spdlog CONFIG REQUIRED)
+add_compile_definitions("SPDLOG_FMT_EXTERNAL")
+include_directories(${spdlog_INCLUDE_DIR})
+
 # --------------------------------------------------------
 # Set config of yaml-cpp
 set(yaml-cpp_DIR "${_THIRDPARTY_BUILD_DIR}/yaml-cpp/lib/cmake/yaml-cpp")

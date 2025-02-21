@@ -10,6 +10,7 @@
 #include <vector>
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/xml_parser.hpp>
+#include <upnp_logger.hpp>
 
 namespace sgns::upnp
 {
@@ -105,6 +106,7 @@ namespace sgns::upnp
 		std::string _controlHost;
 		std::mutex upnp_mutex;
 		int _controlPort;
+		Logger m_logger = createLogger("UPNP");
 	};
 }
 
