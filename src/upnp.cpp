@@ -112,6 +112,7 @@ namespace sgns::upnp
         }
         catch (const boost::system::system_error& e) {
             std::cerr << "Failed to bind to " << local_ip << ": " << e.what() << std::endl;
+            return false;
         }
             // Send M-SEARCH request for each search target
             for (auto target : search_targets) {
