@@ -88,10 +88,7 @@ namespace sgns::upnp
             "urn:schemas-upnp-org:device:InternetGatewayDevice:2"
         };
         auto self = shared_from_this();
-        boost::asio::ip::udp::socket socket(*_ioc);
 
-        //boost::asio::ip::udp::resolver resolver(*_ioc);
-        //boost::asio::ip::udp::resolver::query query(boost::asio::ip::udp::v4(), boost::asio::ip::host_name(), "");
         std::string local_ip = GetLocalIPFromOS();
         if (local_ip.empty()) {
             return false;
@@ -105,10 +102,10 @@ namespace sgns::upnp
             //boost::asio::ip::udp::endpoint local_endpoint(*endpoint_it);
 
             // Open socket and bind to local endpoint
-            socket.open(boost::asio::ip::udp::v4());
+            socket_->open(boost::asio::ip::udp::v4());
             boost::asio::socket_base::reuse_address reuseAddr(true);
-            socket.set_option(reuseAddr);
-            socket.bind(local_endpoint);
+            socket_->set_option(reuseAddr);
+            socket_->bind(local_endpoint);
         }
         catch (const boost::system::system_error& e) {
             m_logger->error("Failed to bind to {} because {}", local_ip, e.what());
@@ -125,16 +122,17 @@ namespace sgns::upnp
                     << "USER-AGENT: asio-upnp/1.0\r\n"
                     << "\r\n";
                 std::string request = ss.str();
-                socket.async_send_to(boost::asio::buffer(request.data(), request.size()), _multicast,
-                    [self, &socket, local_endpoint](const boost::system::error_code& error, size_t bytes_sent) {
+                socket_->async_send_to(boost::asio::buffer(request.data(), request.size()), _multicast,
+                    [self, local_endpoint](const boost::system::error_code& error, size_t bytes_sent) {
                         if (!error) {
                             //std::array<char, 32 * 1024> rx;
                             //boost::asio::mutable_buffer receive_buffer(rx.data(), rx.size());
                             auto headerbuff = std::make_shared<boost::asio::streambuf>();
+                            auto head_begin = headerbuff->prepare(1024);
 
                             boost::asio::ip::udp::endpoint remote_endpoint;
-                            socket.async_receive_from(headerbuff->prepare(1024), remote_endpoint,
-                                [self, &socket, headerbuff, local_endpoint](const boost::system::error_code& receive_error, size_t bytes_received) {
+                            self->socket_->async_receive_from(head_begin, remote_endpoint,
+                                [self, headerbuff, local_endpoint](const boost::system::error_code& receive_error, size_t bytes_received) {
                                     if (!receive_error) {
                                         headerbuff->commit(bytes_received);
                                         auto buffer = std::make_shared<std::vector<char>>(boost::asio::buffers_begin(headerbuff->data()), boost::asio::buffers_end(headerbuff->data()));
@@ -160,7 +158,7 @@ namespace sgns::upnp
                     }
                     else {
                         // Timer expired, handle timeout
-                        socket.cancel();
+                        socket_->cancel();
                         self->m_logger->error("Async operation timed out.");
                     }
                     });
@@ -169,10 +167,10 @@ namespace sgns::upnp
                 //_ioc->stop();
                 
             }
-            socket.close();
+            socket_->close();
         //}
 
-        //socket.close();
+        //socket_->close();
         _ioc->stop();
 
         for (const auto& rootDescXML : *_rootDescXML) {
@@ -238,7 +236,7 @@ namespace sgns::upnp
                 if (!connect_error)
                 {
                     //auto write_buffer = boost::asio::buffer(get_request);
-                    boost::asio::async_write(*tcpsocket, write_buffer, [self, tcpsocket, gotparse, host, port, write_buffer](const boost::system::error_code& write_error, std::size_t)
+                    boost::asio::async_write(*tcpsocket, write_buffer, [self, tcpsocket, gotparse, host, port](const boost::system::error_code& write_error, std::size_t)
                         {
                             //boost::asio::streambuf rootdesc;
                             auto rootdesc = std::make_shared<boost::asio::streambuf>();
@@ -373,7 +371,7 @@ namespace sgns::upnp
             {
                 if (!connect_error)
                 {                    
-                    boost::asio::async_write(*tcpsocket, write_buffer, [self, tcpsocket, write_buffer, &result](const boost::system::error_code& write_error, std::size_t)
+                    boost::asio::async_write(*tcpsocket, write_buffer, [self, tcpsocket, &result](const boost::system::error_code& write_error, std::size_t)
                         {
                             auto openportb = std::make_shared<boost::asio::streambuf>();
                             boost::asio::async_read(*tcpsocket, *openportb, boost::asio::transfer_all(), [self, tcpsocket, openportb, &result](const boost::system::error_code& read_error, std::size_t bytes_transferred)

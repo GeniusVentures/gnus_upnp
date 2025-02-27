@@ -21,14 +21,14 @@ namespace sgns::upnp
 		UPNP()
 			:
 			_ioc(std::make_shared<boost::asio::io_context>()),
-			_ioc2(std::make_shared<boost::asio::io_context>()),
 			_multicast(boost::asio::ip::address_v4({ 239, 255, 255, 250 }), 1900),
 			_rootDescXML(std::make_shared<std::vector<IGDInfo>>()),
 			_rootDescData(std::make_shared<std::string>()),
 			_bindIp(std::make_shared<std::string>()),
 			_localIpAddress(""),
 			_controlHost(""),
-			_controlPort(0)
+			_controlPort(0),
+			socket_(std::make_shared<boost::asio::ip::udp::socket>(*_ioc))
 		{
 
 		}
@@ -97,7 +97,6 @@ namespace sgns::upnp
 
 		//Vars
 		std::shared_ptr<boost::asio::io_context> _ioc;
-		std::shared_ptr<boost::asio::io_context> _ioc2;
 		const boost::asio::ip::udp::endpoint _multicast;
 		std::shared_ptr<std::vector<IGDInfo>> _rootDescXML;
 		std::shared_ptr<std::string> _rootDescData;
@@ -107,6 +106,8 @@ namespace sgns::upnp
 		std::mutex upnp_mutex;
 		int _controlPort;
 		Logger m_logger = createLogger("UPNP");
+		std::shared_ptr<boost::asio::ip::udp::socket> socket_;
+
 	};
 }
 
