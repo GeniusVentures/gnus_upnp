@@ -448,4 +448,61 @@ namespace sgns::upnp
     {
         return _localIpAddress;
     }
+
+    bool UPNP::CheckIfPortInUse(int extPort, const std::string& protocol, std::string& outInternalClient)
+    {
+        // Read IGD XML
+        std::istringstream iss(*_rootDescData);
+        boost::property_tree::ptree tree;
+        boost::property_tree::read_xml(iss, tree);
+
+        // Build SOAP request for GetSpecificPortMappingEntry
+        std::string soap = "<?xml version=\"1.0\"?>"
+            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
+            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
+            "<s:Body>"
+            "<u:GetSpecificPortMappingEntry xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
+            "<NewRemoteHost></NewRemoteHost>"
+            "<NewExternalPort>" + std::to_string(extPort) + "</NewExternalPort>"
+            "<NewProtocol>" + protocol + "</NewProtocol>"
+            "</u:GetSpecificPortMappingEntry>"
+            "</s:Body>"
+            "</s:Envelope>";
+
+        // Add HTTP headers to SOAP body
+        auto soaprqwithhttp = AddHTTPtoSoap(
+            soap,
+            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
+            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
+            "#GetSpecificPortMappingEntry"
+        );
+
+        // Send SOAP request and get result
+        std::string soapresponse;
+        if (!SendSOAPRequest(soaprqwithhttp, soapresponse)) {
+            return false; // Network error
+        }
+
+        // Parse SOAP response
+        std::istringstream soaprespdata(soapresponse);
+        boost::property_tree::ptree soaptree;
+        boost::property_tree::read_xml(soaprespdata, soaptree);
+
+        try {
+            outInternalClient = soaptree.get<std::string>(
+                "s:Envelope.s:Body.u:GetSpecificPortMappingEntryResponse.NewInternalClient"
+            );
+            return true;
+        }
+        catch (const boost::property_tree::ptree_bad_path& e) {
+            // If the port mapping entry does not exist, this will throw
+            m_logger->info("Port {} (protocol {}) is not mapped: {}", extPort, protocol, e.what());
+            return false;
+        }
+        catch (const std::exception& e) {
+            m_logger->error("Exception while checking port {} ({}): {}", extPort, protocol, e.what());
+            return false;
+        }
+    }
+
 }
