@@ -60,6 +60,12 @@ namespace sgns::upnp
 		/** List opened ports - not implemented(yet)
 		*/
 		void ListOpenPorts();
+		/** Check if a given port is used by an IP that isn't our own
+		 * @param extPort - Port
+		 * @param protocol - Protocol
+		 * @param outInternalClient - Ref string for checking versus our own ip
+		*/
+		bool UPNP::CheckIfPortInUse(int extPort, const std::string& protocol, std::string& outInternalClient);
 
 	private:
 		/** Parse IGD data, currently only concerns itself with getting the rootDesc XML location

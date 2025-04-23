@@ -22,7 +22,21 @@ void upnp_task(int thread_id) {
         } else {
             std::cout << "Thread " << thread_id << " Open Port Success" << 7477 + thread_id << std::endl;
         }
+        std::string owner;
+        if (upnp->CheckIfPortInUse(31129, "UDP", owner)) {
+            if (owner != upnp->GetLocalIP()) {
+                std::cout << "Port is already mapped by another LAN IP: " << owner << std::endl;
+            }
+            else {
+                std::cout << "Port is already mapped by this device." << std::endl;
+            }
+        }
+        else {
+            std::cout << "Port is free for mapping." << std::endl;
+        }
     }
+
+
 }
 
 int main() {
