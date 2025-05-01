@@ -65,7 +65,7 @@ namespace sgns::upnp
 		 * @param protocol - Protocol
 		 * @param outInternalClient - Ref string for checking versus our own ip
 		*/
-		bool UPNP::CheckIfPortInUse(int extPort, const std::string& protocol, std::string& outInternalClient);
+		bool CheckIfPortInUse(int extPort, const std::string& protocol, std::string& outInternalClient);
 
 	private:
 		/** Parse IGD data, currently only concerns itself with getting the rootDesc XML location
