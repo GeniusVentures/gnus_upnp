@@ -1,16 +1,15 @@
 add_library(gnus_upnp STATIC
     upnp.cpp
-	../include/upnp.hpp
-	upnp_logger.cpp 
-	../include/upnp_logger.hpp
-    )
-include_directories(
-	${PROJECT_SOURCE_DIR}/src
-	)
-target_include_directories(gnus_upnp PRIVATE ${GSL_INCLUDE_DIR} ${spdlog_INCLUDE_DIR}) 
-target_link_libraries(gnus_upnp PRIVATE
-	${Boost_LIBRARIES}
-	spdlog::spdlog
+    upnp_logger.cpp
 )
-	
-include_directories(../include )
+
+target_include_directories(
+    gnus_upnp
+    PRIVATE ${GSL_INCLUDE_DIR} ${spdlog_INCLUDE_DIR}
+    PUBLIC $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+
+target_link_libraries(gnus_upnp PUBLIC
+    Boost::headers
+    spdlog::spdlog
+)
