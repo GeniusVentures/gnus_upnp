@@ -4,6 +4,8 @@ if(WIN32)
     add_definitions(-D_WIN32_WINNT=0x0A00)
 endif()
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 add_definitions(-DBOOST_BIND_GLOBAL_PLACEHOLDERS)
 
 include(GNUInstallDirs)
@@ -15,15 +17,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# find_package(GTest CONFIG REQUIRED)
-# find_package(OpenSSL REQUIRED)
-# include_directories(${OPENSSL_INCLUDE_DIR})
-# include_directories(${GSL_INCLUDE_DIR})
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
-# find_package(yaml-cpp CONFIG REQUIRED)
-# find_package(tsl_hat_trie CONFIG REQUIRED)
-# find_package(Boost.DI CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS date_time filesystem random regex system thread log program_options)
 include_directories(${Boost_INCLUDE_DIRS})
 
