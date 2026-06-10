@@ -279,7 +279,11 @@ namespace sgns::upnp
                                         self->_controlPort = port;
                                         self->_localIpAddress = tcpsocket->local_endpoint().address().to_string();
                                         *self->_bindIp = self->_localIpAddress;
-                                        //ParseRootDesc(bufferStr);
+                                        self->m_logger->info(
+                                            "UPnP root description received from {}:{} ({} bytes, "
+                                            "first 500 chars): {}",
+                                            host, port, bufferStr.size(),
+                                            bufferStr.substr(0, 500));
                                         *gotparse = true;
                                     }
                                     else {
@@ -319,18 +323,64 @@ namespace sgns::upnp
         }
     }
 
+    namespace {
+        struct IGDServiceInfo {
+            std::string serviceType;
+            std::string controlURL;
+        };
+
+        /// Parse service info from the IGD root description XML.
+        /// Returns boost::none if the expected XML path is not found
+        /// (router uses a different UPnP device hierarchy).
+        /// On failure, logs the missing path AND the raw XML for diagnostics.
+        boost::optional<IGDServiceInfo> parseIGDServiceInfo(
+            const boost::property_tree::ptree &tree,
+            const std::string &rawXml,
+            Logger logger) {
+            try {
+                const std::string path =
+                    "root.device.deviceList.device.deviceList.device.serviceList.service";
+                IGDServiceInfo info;
+                info.serviceType = tree.get<std::string>(path + ".serviceType");
+                info.controlURL  = tree.get<std::string>(path + ".controlURL");
+                return info;
+            } catch (const boost::property_tree::ptree_bad_path &e) {
+                logger->error(
+                    "UPnP root description missing expected path: {}\n"
+                    "Raw XML (first 2000 chars): {}",
+                    e.what(),
+                    rawXml.substr(0, 2000));
+                return boost::none;
+            } catch (const std::exception &e) {
+                logger->error(
+                    "Exception parsing UPnP root description: {}\n"
+                    "Raw XML (first 2000 chars): {}",
+                    e.what(),
+                    rawXml.substr(0, 2000));
+                return boost::none;
+            }
+        }
+    }  // namespace
+
     bool UPNP::OpenPort(int intPort, int extPort, std::string type, int time)
     {
         //Read XML data
         std::istringstream iss(*_rootDescData);
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
+
+        // Parse service info safely — routers may have different XML structures
+        auto svc = parseIGDServiceInfo(tree, *_rootDescData, m_logger);
+        if (!svc) {
+            return false;
+        }
+
         //Build a SOAP request
         std::string soap = "<?xml version=\"1.0\"?>"
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
             " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
             "<s:Body>"
-            "<u:AddPortMapping xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
+            "<u:AddPortMapping xmlns:u=\"" + svc->serviceType + "\">"
             "<NewRemoteHost></NewRemoteHost>"
             "<NewExternalPort>" + std::to_string(extPort) + "</NewExternalPort>"
             "<NewProtocol>" + type + "</NewProtocol>"
@@ -342,9 +392,8 @@ namespace sgns::upnp
             "</u:AddPortMapping>"
             "</s:Body>"
             "</s:Envelope>";
-        auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
-            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
-            "#AddPortMapping");
+        auto soaprqwithhttp = AddHTTPtoSoap(soap, svc->controlURL,
+            svc->serviceType, "#AddPortMapping");
 
         //Send SOAP request
         std::string soapresponse;
@@ -446,19 +495,23 @@ namespace sgns::upnp
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
 
+        // Parse service info safely — routers may have different XML structures
+        auto svc = parseIGDServiceInfo(tree, *_rootDescData, m_logger);
+        if (!svc) {
+            return "";
+        }
+
         //Build a SOAP request
         std::string soap = "<?xml version=\"1.0\"?>"
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
             " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
             "<s:Body>"
-            "<u:GetExternalIPAddress xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
+            "<u:GetExternalIPAddress xmlns:u=\"" + svc->serviceType + "\">"
             "</u:GetExternalIPAddress>"
             "</s:Body>"
             "</s:Envelope>";
-        auto soaprqwithhttp = AddHTTPtoSoap(soap, tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
-            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
-            "#GetExternalIPAddress");
-        
+        auto soaprqwithhttp = AddHTTPtoSoap(soap, svc->controlURL,
+            svc->serviceType, "#GetExternalIPAddress");
 
         //Send SOAP request
         std::string soapresponse;
@@ -494,12 +547,18 @@ namespace sgns::upnp
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml(iss, tree);
 
+        // Parse service info safely — routers may have different XML structures
+        auto svc = parseIGDServiceInfo(tree, *_rootDescData, m_logger);
+        if (!svc) {
+            return false;
+        }
+
         // Build SOAP request for GetSpecificPortMappingEntry
         std::string soap = "<?xml version=\"1.0\"?>"
             "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
             " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
             "<s:Body>"
-            "<u:GetSpecificPortMappingEntry xmlns:u=\"" + tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType") + "\">"
+            "<u:GetSpecificPortMappingEntry xmlns:u=\"" + svc->serviceType + "\">"
             "<NewRemoteHost></NewRemoteHost>"
             "<NewExternalPort>" + std::to_string(extPort) + "</NewExternalPort>"
             "<NewProtocol>" + protocol + "</NewProtocol>"
@@ -509,11 +568,8 @@ namespace sgns::upnp
 
         // Add HTTP headers to SOAP body
         auto soaprqwithhttp = AddHTTPtoSoap(
-            soap,
-            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.controlURL"),
-            tree.get<std::string>("root.device.deviceList.device.deviceList.device.serviceList.service.serviceType"),
-            "#GetSpecificPortMappingEntry"
-        );
+            soap, svc->controlURL, svc->serviceType,
+            "#GetSpecificPortMappingEntry");
 
         // Send SOAP request and get result
         std::string soapresponse;
