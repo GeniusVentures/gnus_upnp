@@ -302,6 +302,39 @@ namespace sgns::upnp
         _ioc->reset();
         
         tcpsocket->close();
+
+        // Verify this is actually an InternetGatewayDevice, not some other
+        // UPnP device (e.g. Philips Hue Bridge) that responded to M-SEARCH.
+        if (*gotparse) {
+            try {
+                std::istringstream iss(*_rootDescData);
+                boost::property_tree::ptree tree;
+                boost::property_tree::read_xml(iss, tree);
+                auto deviceType = tree.get<std::string>("root.device.deviceType");
+
+                if (deviceType.find("InternetGatewayDevice") == std::string::npos) {
+                    m_logger->warn(
+                        "SSDP response from {}:{} is not an IGD (deviceType: {}), "
+                        "continuing discovery...",
+                        host, port, deviceType);
+                    _rootDescData->clear();
+                    return false;
+                }
+            } catch (const boost::property_tree::ptree_bad_path &e) {
+                m_logger->warn(
+                    "Cannot determine device type from {}:{}, continuing "
+                    "discovery...",
+                    host, port);
+                _rootDescData->clear();
+                return false;
+            } catch (const std::exception &e) {
+                m_logger->warn("Error parsing root description from {}:{}: {}",
+                               host, port, e.what());
+                _rootDescData->clear();
+                return false;
+            }
+        }
+
         return *gotparse;
     }
 
