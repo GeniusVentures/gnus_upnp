@@ -1,8 +1,11 @@
 #include <upnp.hpp>
+#include <upnp_igd_parser.hpp>
+#include <upnp_util.hpp>
 #include <iostream>
 #include <string>
 #include <regex>
 #include <algorithm>
+#include <set>
 #if defined(_WIN32)
 #include <winsock2.h>
 #include <iphlpapi.h>
@@ -200,6 +203,24 @@ namespace sgns::upnp
             m_logger->warn("No SSDP responses received from any local interface.");
         }
 
+        // Deduplicate: some devices (e.g. Philips Hue) respond multiple
+        // times to the same M-SEARCH.  Only fetch each rootDesc URL once.
+        {
+            std::set<std::string> seen;
+            auto it = _rootDescXML->begin();
+            while (it != _rootDescXML->end()) {
+                if (!seen.insert(it->rootDescXML).second) {
+                    m_logger->debug("Skipping duplicate SSDP response from {}",
+                                    it->rootDescXML);
+                    it = _rootDescXML->erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            m_logger->info("SSDP discovery: {} unique device(s) responded",
+                           _rootDescXML->size());
+        }
+
         for (const auto& rootDescXML : *_rootDescXML) {
             auto gotrootdesc = GetRootDesc(rootDescXML);
             if (gotrootdesc) {
@@ -213,24 +234,16 @@ namespace sgns::upnp
 
     bool UPNP::ParseIGD(std::string ip, std::string lines)
     {
-        // Define a regex pattern to match the LOCATION header
-        std::regex locationRegex(R"(LOCATION:\s*(.*))", std::regex_constants::icase);
-
-        // Search for the LOCATION header in the response
-        std::smatch match;
-        if (std::regex_search(lines, match, locationRegex)) {
-            // Extract and return the location URL
+        auto parsed = parseSSDPResponse(lines, ip);
+        if (parsed) {
             IGDInfo info;
-            info.ipAddress = ip;
-            info.rootDescXML = match[1].str();
+            info.ipAddress   = parsed->ipAddress;
+            info.rootDescXML = parsed->locationURL;
             _rootDescXML->push_back(info);
             return true;
         }
-        else {
-            // No LOCATION header found
-            m_logger->error("No location header from IGD.");
-            return false;
-        }
+        m_logger->error("No location header from IGD.");
+        return false;
     }
 
     bool UPNP::GetRootDesc(IGDInfo xml)
@@ -339,61 +352,13 @@ namespace sgns::upnp
     }
 
     bool UPNP::ParseURL(const std::string& url, std::string& host, unsigned short& port, std::string& path) {
-        // Regular expression to match the URL format
-        std::regex urlRegex(R"(http://([^:/]+):(\d+)(.*))");
-
-        std::smatch match;
-        if (std::regex_match(url, match, urlRegex)) {
-            // Extract host, port, and path from the matched groups
-            host = match[1];
-            port = std::stoi(match[2]);
-            path = match[3];
-            return true;
-        }
-        else {
+        if (!sgns::upnp::ParseURL(url, host, port, path)) {
             m_logger->error("Invalid URL format: {}", url);
             return false;
         }
+        return true;
     }
 
-    namespace {
-        struct IGDServiceInfo {
-            std::string serviceType;
-            std::string controlURL;
-        };
-
-        /// Parse service info from the IGD root description XML.
-        /// Returns boost::none if the expected XML path is not found
-        /// (router uses a different UPnP device hierarchy).
-        /// On failure, logs the missing path AND the raw XML for diagnostics.
-        boost::optional<IGDServiceInfo> parseIGDServiceInfo(
-            const boost::property_tree::ptree &tree,
-            const std::string &rawXml,
-            Logger logger) {
-            try {
-                const std::string path =
-                    "root.device.deviceList.device.deviceList.device.serviceList.service";
-                IGDServiceInfo info;
-                info.serviceType = tree.get<std::string>(path + ".serviceType");
-                info.controlURL  = tree.get<std::string>(path + ".controlURL");
-                return info;
-            } catch (const boost::property_tree::ptree_bad_path &e) {
-                logger->error(
-                    "UPnP root description missing expected path: {}\n"
-                    "Raw XML (first 2000 chars): {}",
-                    e.what(),
-                    rawXml.substr(0, 2000));
-                return boost::none;
-            } catch (const std::exception &e) {
-                logger->error(
-                    "Exception parsing UPnP root description: {}\n"
-                    "Raw XML (first 2000 chars): {}",
-                    e.what(),
-                    rawXml.substr(0, 2000));
-                return boost::none;
-            }
-        }
-    }  // namespace
 
     bool UPNP::OpenPort(int intPort, int extPort, std::string type, int time)
     {
@@ -452,15 +417,9 @@ namespace sgns::upnp
 
     std::string UPNP::AddHTTPtoSoap(std::string soapxml, std::string path, std::string device, std::string action)
     {
-        //Construct a SOAP request with HTTP header for posting
-        std::string httpRequest = "POST " + path + " HTTP/1.1\r\n";
-        httpRequest += "HOST: " + _controlHost + ":" + std::to_string(_controlPort) + "\r\n";
-        httpRequest += "CONTENT-TYPE: text/xml; charset=\"utf-8\"\r\n";
-        httpRequest += "CONTENT-LENGTH: " + std::to_string(soapxml.size()) + "\r\n";
-        httpRequest += "SOAPACTION: \"" + device + action + "\"\r\n";
-        httpRequest += "\r\n"; // End of headers
-        httpRequest += soapxml;
-        return httpRequest;
+        return sgns::upnp::AddHTTPtoSoap(std::move(soapxml), std::move(path),
+                                         _controlHost, _controlPort,
+                                         std::move(device), std::move(action));
     }
 
     bool UPNP::SendSOAPRequest(std::string soaprq, std::string& result)
