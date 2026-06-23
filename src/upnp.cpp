@@ -1,8 +1,12 @@
 #include <any>
 #include <upnp.hpp>
+#include <upnp_igd_parser.hpp>
+#include <upnp_util.hpp>
 #include <iostream>
 #include <string>
 #include <regex>
+#include <algorithm>
+#include <set>
 #if defined( _WIN32 )
 #include <winsock2.h>
 #include <iphlpapi.h>
@@ -16,8 +20,9 @@
 
 namespace sgns::upnp
 {
-    std::string GetLocalIPFromOS()
+    std::vector<std::string> GetLocalIPv4CandidatesFromOS()
     {
+        std::vector<std::string> candidates;
 #if defined( _WIN32 )
         ULONG                 bufferSize       = 15000;
         IP_ADAPTER_ADDRESSES *adapterAddresses = (IP_ADAPTER_ADDRESSES *)malloc( bufferSize );
@@ -28,14 +33,26 @@ namespace sgns::upnp
             adapterAddresses = (IP_ADAPTER_ADDRESSES *)malloc( bufferSize );
         }
 
-        std::string localIP = ""; // Start with an empty string
+        struct Candidate
+        {
+            std::string ip;
+            bool        hasGateway;
+            bool        isVirtualLike;
+        };
 
-        if ( GetAdaptersAddresses( AF_INET, 0, nullptr, adapterAddresses, &bufferSize ) == NO_ERROR )
+        std::vector<Candidate> ranked;
+
+        if ( GetAdaptersAddresses( AF_INET, GAA_FLAG_INCLUDE_GATEWAYS, nullptr, adapterAddresses, &bufferSize ) ==
+             NO_ERROR )
         {
             for ( IP_ADAPTER_ADDRESSES *adapter = adapterAddresses; adapter; adapter = adapter->Next )
             {
                 if ( adapter->OperStatus == IfOperStatusUp && adapter->IfType != IF_TYPE_SOFTWARE_LOOPBACK )
                 {
+                    const bool hasGateway    = ( adapter->FirstGatewayAddress != nullptr );
+                    const bool isVirtualLike = ( adapter->IfType == IF_TYPE_TUNNEL ) ||
+                                               ( adapter->IfType == IF_TYPE_PROP_VIRTUAL );
+
                     for ( IP_ADAPTER_UNICAST_ADDRESS *unicast = adapter->FirstUnicastAddress; unicast;
                           unicast                             = unicast->Next )
                     {
@@ -47,13 +64,12 @@ namespace sgns::upnp
                                        &( ( (struct sockaddr_in *)addrStruct )->sin_addr ),
                                        buffer,
                                        INET_ADDRSTRLEN );
-                            localIP = buffer;
+                            std::string localIP = buffer;
 
                             // Ensure it's not a loopback IP (127.x.x.x)
                             if ( localIP.rfind( "127.", 0 ) != 0 )
                             {
-                                free( adapterAddresses );
-                                return localIP;
+                                ranked.push_back( { localIP, hasGateway, isVirtualLike } );
                             }
                         }
                     }
@@ -62,16 +78,34 @@ namespace sgns::upnp
         }
 
         free( adapterAddresses );
-        return localIP; // Return the best found address or empty if none were valid
+
+        std::stable_sort( ranked.begin(),
+                          ranked.end(),
+                          []( const Candidate &a, const Candidate &b )
+                          {
+                              if ( a.hasGateway != b.hasGateway )
+                              {
+                                  return a.hasGateway > b.hasGateway;
+                              }
+                              if ( a.isVirtualLike != b.isVirtualLike )
+                              {
+                                  return a.isVirtualLike < b.isVirtualLike;
+                              }
+                              return false;
+                          } );
+
+        for ( const auto &entry : ranked )
+        {
+            candidates.push_back( entry.ip );
+        }
 
 #else // Unix-like (Linux/macOS)
         struct ifaddrs *ifaddr, *ifa;
-        std::string     localIP = "";
 
         if ( getifaddrs( &ifaddr ) == -1 )
         {
             perror( "getifaddrs" );
-            return localIP;
+            return candidates;
         }
 
         for ( ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next )
@@ -94,130 +128,161 @@ namespace sgns::upnp
                                      NI_NUMERICHOST );
                 if ( s == 0 )
                 {
-                    localIP = host;
-                    break; // Return the first valid non-loopback IPv4 address
+                    candidates.push_back( host );
                 }
             }
         }
 
         freeifaddrs( ifaddr );
-        return localIP; // Return the best found address or empty if none were valid
 #endif
+
+        return candidates;
     }
 
     bool UPNP::GetIGD()
     {
+        m_logger->set_level( spdlog::level::trace );
         std::lock_guard<std::mutex> lock( upnp_mutex );
+        _ioc->reset();
 
         std::chrono::seconds        timeout( 2 );
         std::array<const char *, 2> search_targets = { "urn:schemas-upnp-org:device:InternetGatewayDevice:1",
                                                        "urn:schemas-upnp-org:device:InternetGatewayDevice:2" };
         auto                        self           = shared_from_this();
 
-        std::string local_ip = GetLocalIPFromOS();
-        if ( local_ip.empty() )
-        {
-            return false;
-        }
-        // Iterate over each resolved endpoint
-        //for (auto endpoint_it = resolver.resolve(query); endpoint_it != boost::asio::ip::udp::resolver::iterator(); ++endpoint_it) {
-        //boost::asio::ip::udp::endpoint local_endpoint(boost::asio::ip::address_v4::any(), 0);
-        boost::asio::ip::udp::endpoint local_endpoint( boost::asio::ip::make_address( local_ip ), 0 );
-        try
-        {
-            //boost::asio::ip::udp::endpoint local_endpoint(*endpoint_it);
+        auto bindCandidates = GetLocalIPv4CandidatesFromOS();
+        bindCandidates.push_back( "0.0.0.0" );
 
-            // Open socket and bind to local endpoint
-            socket_->open( boost::asio::ip::udp::v4() );
-            boost::asio::socket_base::reuse_address reuseAddr( true );
-            socket_->set_option( reuseAddr );
-            socket_->bind( local_endpoint );
-        }
-        catch ( const boost::system::system_error &e )
+        for ( const auto &candidateIp : bindCandidates )
         {
-            m_logger->error( "Failed to bind to {} because {}", local_ip, e.what() );
-            return false;
-        }
-
-        // Send M-SEARCH request for each search target
-        for ( auto target : search_targets )
-        {
-            std::stringstream ss;
-            ss << "M-SEARCH * HTTP/1.1\r\n"
-               << "HOST: 239.255.255.250:1900\r\n" // Multicast address and port
-               << "ST: " << target << "\r\n"
-               << "MAN: \"ssdp:discover\"\r\n"
-               << "MX: " << timeout.count() << "\r\n"
-               << "USER-AGENT: asio-upnp/1.0\r\n"
-               << "\r\n";
-            std::string request = ss.str();
-            socket_->async_send_to(
-                boost::asio::buffer( request.data(), request.size() ),
-                _multicast,
-                [self, local_endpoint]( const boost::system::error_code &error, size_t bytes_sent )
+            boost::asio::ip::udp::endpoint local_endpoint( boost::asio::ip::make_address( candidateIp ), 0 );
+            try
+            {
+                if ( socket_->is_open() )
                 {
-                    if ( !error )
-                    {
-                        //std::array<char, 32 * 1024> rx;
-                        //boost::asio::mutable_buffer receive_buffer(rx.data(), rx.size());
-                        auto headerbuff = std::make_shared<boost::asio::streambuf>();
-                        auto head_begin = headerbuff->prepare( 1024 );
+                    socket_->close();
+                }
+                socket_->open( boost::asio::ip::udp::v4() );
+                boost::asio::socket_base::reuse_address reuseAddr( true );
+                socket_->set_option( reuseAddr );
+                socket_->bind( local_endpoint );
+                m_logger->info( "UPNP discovery bound to {}", local_endpoint.address().to_string() );
+            }
+            catch ( const boost::system::system_error &e )
+            {
+                m_logger->warn( "Failed to bind SSDP discovery socket on {}: {}", candidateIp, e.what() );
+                continue;
+            }
 
-                        boost::asio::ip::udp::endpoint remote_endpoint;
-                        self->socket_->async_receive_from(
-                            head_begin,
-                            remote_endpoint,
-                            [self, headerbuff, local_endpoint]( const boost::system::error_code &receive_error,
-                                                                size_t                           bytes_received )
-                            {
-                                if ( !receive_error )
-                                {
-                                    headerbuff->commit( bytes_received );
-                                    auto buffer = std::make_shared<std::vector<char>>(
-                                        boost::asio::buffers_begin( headerbuff->data() ),
-                                        boost::asio::buffers_end( headerbuff->data() ) );
-                                    std::string received_data( buffer->begin(), buffer->end() );
-                                    auto        xmlavail = self->ParseIGD( local_endpoint.address().to_string(),
-                                                                    received_data );
-                                }
-                                else
-                                {
-                                    self->m_logger->error( "Error receiving data:  {}", receive_error.message() );
-                                }
-                            } );
-                    }
-                    else
+            for ( auto target : search_targets )
+            {
+                std::stringstream ss;
+                ss << "M-SEARCH * HTTP/1.1\r\n"
+                   << "HOST: 239.255.255.250:1900\r\n"
+                   << "ST: " << target << "\r\n"
+                   << "MAN: \"ssdp:discover\"\r\n"
+                   << "MX: " << timeout.count() << "\r\n"
+                   << "USER-AGENT: asio-upnp/1.0\r\n"
+                   << "\r\n";
+                auto request = std::make_shared<std::string>( ss.str() );
+                auto timer   = std::make_shared<boost::asio::deadline_timer>( *_ioc );
+                m_logger->trace( "Sending SSDP M-SEARCH for '{}' from {}",
+                                 target,
+                                 local_endpoint.address().to_string() );
+
+                socket_->async_send_to(
+                    boost::asio::buffer( *request ),
+                    _multicast,
+                    [self, local_endpoint, timer, request]( const boost::system::error_code &error, size_t bytes_sent )
                     {
-                        self->m_logger->error( "Error sending data:  {}", error.message() );
-                    }
-                } );
-            // Create and start a timer for timeout
-            boost::asio::deadline_timer timer( *_ioc );
-            timer.expires_from_now( boost::posix_time::milliseconds( 200 ) );
-            timer.async_wait(
-                [&]( const boost::system::error_code &timer_error )
+                        if ( !error )
+                        {
+                            auto headerbuff      = std::make_shared<boost::asio::streambuf>();
+                            auto remote_endpoint = std::make_shared<boost::asio::ip::udp::endpoint>();
+                            auto head_begin      = headerbuff->prepare( 1024 );
+
+                            self->socket_->async_receive_from(
+                                head_begin,
+                                *remote_endpoint,
+                                [self, headerbuff, local_endpoint, timer](
+                                    const boost::system::error_code &receive_error,
+                                    size_t                           bytes_received )
+                                {
+                                    if ( !receive_error )
+                                    {
+                                        timer->cancel();
+                                        headerbuff->commit( bytes_received );
+                                        auto buffer = std::make_shared<std::vector<char>>(
+                                            boost::asio::buffers_begin( headerbuff->data() ),
+                                            boost::asio::buffers_end( headerbuff->data() ) );
+                                        std::string received_data( buffer->begin(), buffer->end() );
+                                        auto        xmlavail = self->ParseIGD( local_endpoint.address().to_string(),
+                                                                        received_data );
+                                    }
+                                    else if ( receive_error != boost::asio::error::operation_aborted )
+                                    {
+                                        self->m_logger->error( "Error receiving data: {}", receive_error.message() );
+                                    }
+                                } );
+                        }
+                        else
+                        {
+                            self->m_logger->error( "Error sending data: {}", error.message() );
+                        }
+                    } );
+
+                timer->expires_from_now( boost::posix_time::milliseconds( timeout.count() * 1000 ) );
+                timer->async_wait(
+                    [self]( const boost::system::error_code &timer_error )
+                    {
+                        if ( !timer_error )
+                        {
+                            self->socket_->cancel();
+                            self->m_logger->debug( "SSDP receive timed out waiting for response." );
+                        }
+                    } );
+
+                _ioc->run();
+                _ioc->reset();
+
+                if ( !_rootDescXML->empty() )
                 {
-                    if ( timer_error == boost::asio::error::operation_aborted )
-                    {
-                        // Timer was cancelled due to successful completion
-                        self->m_logger->info( "Timer Cancelled Normally" );
-                    }
-                    else
-                    {
-                        // Timer expired, handle timeout
-                        socket_->cancel();
-                        self->m_logger->error( "Async operation timed out." );
-                    }
-                } );
-            _ioc->run();
-            _ioc->reset();
-            //_ioc->stop();
+                    break;
+                }
+            }
+
+            socket_->close();
+            if ( !_rootDescXML->empty() )
+            {
+                break;
+            }
         }
-        socket_->close();
-        //}
 
         //socket_->close();
-        _ioc->stop();
+        if ( _rootDescXML->empty() )
+        {
+            m_logger->warn( "No SSDP responses received from any local interface." );
+        }
+
+        // Deduplicate: some devices (e.g. Philips Hue) respond multiple
+        // times to the same M-SEARCH.  Only fetch each rootDesc URL once.
+        {
+            std::set<std::string> seen;
+            auto                  it = _rootDescXML->begin();
+            while ( it != _rootDescXML->end() )
+            {
+                if ( !seen.insert( it->rootDescXML ).second )
+                {
+                    m_logger->debug( "Skipping duplicate SSDP response from {}", it->rootDescXML );
+                    it = _rootDescXML->erase( it );
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+            m_logger->info( "SSDP discovery: {} unique device(s) responded", _rootDescXML->size() );
+        }
 
         for ( const auto &rootDescXML : *_rootDescXML )
         {
@@ -234,22 +299,15 @@ namespace sgns::upnp
 
     bool UPNP::ParseIGD( std::string ip, std::string lines )
     {
-        // Define a regex pattern to match the LOCATION header
-        std::regex locationRegex( R"(LOCATION:\s*(.*))", std::regex_constants::icase );
-
-        // Search for the LOCATION header in the response
-        std::smatch match;
-        if ( std::regex_search( lines, match, locationRegex ) )
+        auto parsed = parseSSDPResponse( lines, ip );
+        if ( parsed )
         {
-            // Extract and return the location URL
             IGDInfo info;
-            info.ipAddress   = ip;
-            info.rootDescXML = match[1].str();
+            info.ipAddress   = parsed->ipAddress;
+            info.rootDescXML = parsed->locationURL;
             _rootDescXML->push_back( info );
             return true;
         }
-
-        // No LOCATION header found
         m_logger->error( "No location header from IGD." );
         return false;
     }
@@ -272,9 +330,8 @@ namespace sgns::upnp
         //Connect
         //TODO: Support HTTPS because some routers use this.
         auto                           gotparse = std::make_shared<bool>( false );
-        boost::asio::ip::tcp::endpoint tcp_endpoint( boost::asio::ip::make_address( xml.ipAddress ), 0 );
-        *_bindIp       = xml.ipAddress;
-        auto tcpsocket = std::make_shared<boost::asio::ip::tcp::socket>( *_ioc );
+        boost::asio::ip::tcp::endpoint tcp_endpoint( boost::asio::ip::address_v4::any(), 0 );
+        auto                           tcpsocket = std::make_shared<boost::asio::ip::tcp::socket>( *_ioc );
         tcpsocket->open( boost::asio::ip::tcp::v4() );
         tcpsocket->bind( tcp_endpoint );
         std::string get_request  = "GET " + path + " HTTP/1.1\r\nHost: " + host + "\r\nConnection: close\r\n\r\n";
@@ -313,7 +370,13 @@ namespace sgns::upnp
                                         self->_controlHost    = host;
                                         self->_controlPort    = port;
                                         self->_localIpAddress = tcpsocket->local_endpoint().address().to_string();
-                                        //ParseRootDesc(bufferStr);
+                                        *self->_bindIp        = self->_localIpAddress;
+                                        self->m_logger->info( "UPnP root description received from {}:{} ({} bytes, "
+                                                              "first 500 chars): {}",
+                                                              host,
+                                                              port,
+                                                              bufferStr.size(),
+                                                              bufferStr.substr( 0, 500 ) );
                                         *gotparse = true;
                                     }
                                     else
@@ -334,26 +397,57 @@ namespace sgns::upnp
         _ioc->reset();
 
         tcpsocket->close();
+
+        // Verify this is actually an InternetGatewayDevice, not some other
+        // UPnP device (e.g. Philips Hue Bridge) that responded to M-SEARCH.
+        if ( *gotparse )
+        {
+            try
+            {
+                std::istringstream          iss( *_rootDescData );
+                boost::property_tree::ptree tree;
+                boost::property_tree::read_xml( iss, tree );
+                auto deviceType = tree.get<std::string>( "root.device.deviceType" );
+
+                if ( deviceType.find( "InternetGatewayDevice" ) == std::string::npos )
+                {
+                    m_logger->warn( "SSDP response from {}:{} is not an IGD (deviceType: {}), "
+                                    "continuing discovery...",
+                                    host,
+                                    port,
+                                    deviceType );
+                    _rootDescData->clear();
+                    return false;
+                }
+            }
+            catch ( const boost::property_tree::ptree_bad_path &e )
+            {
+                m_logger->warn( "Cannot determine device type from {}:{}, continuing "
+                                "discovery...",
+                                host,
+                                port );
+                _rootDescData->clear();
+                return false;
+            }
+            catch ( const std::exception &e )
+            {
+                m_logger->warn( "Error parsing root description from {}:{}: {}", host, port, e.what() );
+                _rootDescData->clear();
+                return false;
+            }
+        }
+
         return *gotparse;
     }
 
     bool UPNP::ParseURL( const std::string &url, std::string &host, unsigned short &port, std::string &path )
     {
-        // Regular expression to match the URL format
-        std::regex urlRegex( R"(http://([^:/]+):(\d+)(.*))" );
-
-        std::smatch match;
-        if ( std::regex_match( url, match, urlRegex ) )
+        if ( !sgns::upnp::ParseURL( url, host, port, path ) )
         {
-            // Extract host, port, and path from the matched groups
-            host = match[1];
-            port = std::stoi( match[2] );
-            path = match[3];
-            return true;
+            m_logger->error( "Invalid URL format: {}", url );
+            return false;
         }
-
-        m_logger->error( "Invalid URL format: {}", url );
-        return false;
+        return true;
     }
 
     bool UPNP::OpenPort( int intPort, int extPort, std::string type, int time )
@@ -362,14 +456,21 @@ namespace sgns::upnp
         std::istringstream          iss( *_rootDescData );
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml( iss, tree );
+
+        // Parse service info safely — routers may have different XML structures
+        auto svc = parseIGDServiceInfo( tree, *_rootDescData, m_logger );
+        if ( !svc )
+        {
+            return false;
+        }
+
         //Build a SOAP request
         std::string soap = "<?xml version=\"1.0\"?>"
                            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
                            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
                            "<s:Body>"
                            "<u:AddPortMapping xmlns:u=\"" +
-                           tree.get<std::string>(
-                               "root.device.deviceList.device.deviceList.device.serviceList.service.serviceType" ) +
+                           svc->serviceType +
                            "\">"
                            "<NewRemoteHost></NewRemoteHost>"
                            "<NewExternalPort>" +
@@ -392,11 +493,7 @@ namespace sgns::upnp
                            "</u:AddPortMapping>"
                            "</s:Body>"
                            "</s:Envelope>";
-        auto soaprqwithhttp = AddHTTPtoSoap(
-            soap,
-            tree.get<std::string>( "root.device.deviceList.device.deviceList.device.serviceList.service.controlURL" ),
-            tree.get<std::string>( "root.device.deviceList.device.deviceList.device.serviceList.service.serviceType" ),
-            "#AddPortMapping" );
+        auto soaprqwithhttp = AddHTTPtoSoap( soap, svc->controlURL, svc->serviceType, "#AddPortMapping" );
 
         //Send SOAP request
         std::string soapresponse;
@@ -425,15 +522,12 @@ namespace sgns::upnp
 
     std::string UPNP::AddHTTPtoSoap( std::string soapxml, std::string path, std::string device, std::string action )
     {
-        //Construct a SOAP request with HTTP header for posting
-        std::string httpRequest  = "POST " + path + " HTTP/1.1\r\n";
-        httpRequest             += "HOST: " + _controlHost + ":" + std::to_string( _controlPort ) + "\r\n";
-        httpRequest             += "CONTENT-TYPE: text/xml; charset=\"utf-8\"\r\n";
-        httpRequest             += "CONTENT-LENGTH: " + std::to_string( soapxml.size() ) + "\r\n";
-        httpRequest             += "SOAPACTION: \"" + device + action + "\"\r\n";
-        httpRequest             += "\r\n"; // End of headers
-        httpRequest             += soapxml;
-        return httpRequest;
+        return sgns::upnp::AddHTTPtoSoap( std::move( soapxml ),
+                                          std::move( path ),
+                                          _controlHost,
+                                          _controlPort,
+                                          std::move( device ),
+                                          std::move( action ) );
     }
 
     bool UPNP::SendSOAPRequest( std::string soaprq, std::string &result )
@@ -442,11 +536,27 @@ namespace sgns::upnp
         //Get Router IP
         boost::asio::ip::tcp::endpoint endpoint( boost::asio::ip::address::from_string( _controlHost ), _controlPort );
 
-        //Bind to the ip we got IGD from
-        boost::asio::ip::tcp::endpoint tcp_endpoint( boost::asio::ip::make_address( *_bindIp ), 0 );
-        auto                           tcpsocket = std::make_shared<boost::asio::ip::tcp::socket>( *_ioc );
+        auto tcpsocket = std::make_shared<boost::asio::ip::tcp::socket>( *_ioc );
         tcpsocket->open( boost::asio::ip::tcp::v4() );
-        tcpsocket->bind( tcp_endpoint );
+
+        // Prefer binding to the discovered local interface; fall back to all interfaces.
+        try
+        {
+            if ( !_bindIp->empty() && *_bindIp != "0.0.0.0" )
+            {
+                boost::asio::ip::tcp::endpoint tcp_endpoint( boost::asio::ip::make_address( *_bindIp ), 0 );
+                tcpsocket->bind( tcp_endpoint );
+            }
+            else
+            {
+                tcpsocket->bind( boost::asio::ip::tcp::endpoint( boost::asio::ip::address_v4::any(), 0 ) );
+            }
+        }
+        catch ( const std::exception &e )
+        {
+            m_logger->warn( "Unable to bind SOAP socket to preferred local IP ({}). Falling back to OS routing.",
+                            e.what() );
+        }
         //Make Soap Buffer
         auto write_buffer = boost::asio::buffer( soaprq );
         tcpsocket->async_connect(
@@ -503,23 +613,25 @@ namespace sgns::upnp
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml( iss, tree );
 
+        // Parse service info safely — routers may have different XML structures
+        auto svc = parseIGDServiceInfo( tree, *_rootDescData, m_logger );
+        if ( !svc )
+        {
+            return "";
+        }
+
         //Build a SOAP request
         std::string soap = "<?xml version=\"1.0\"?>"
                            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
                            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
                            "<s:Body>"
                            "<u:GetExternalIPAddress xmlns:u=\"" +
-                           tree.get<std::string>(
-                               "root.device.deviceList.device.deviceList.device.serviceList.service.serviceType" ) +
+                           svc->serviceType +
                            "\">"
                            "</u:GetExternalIPAddress>"
                            "</s:Body>"
                            "</s:Envelope>";
-        auto soaprqwithhttp = AddHTTPtoSoap(
-            soap,
-            tree.get<std::string>( "root.device.deviceList.device.deviceList.device.serviceList.service.controlURL" ),
-            tree.get<std::string>( "root.device.deviceList.device.deviceList.device.serviceList.service.serviceType" ),
-            "#GetExternalIPAddress" );
+        auto soaprqwithhttp = AddHTTPtoSoap( soap, svc->controlURL, svc->serviceType, "#GetExternalIPAddress" );
 
         //Send SOAP request
         std::string soapresponse;
@@ -559,14 +671,20 @@ namespace sgns::upnp
         boost::property_tree::ptree tree;
         boost::property_tree::read_xml( iss, tree );
 
+        // Parse service info safely — routers may have different XML structures
+        auto svc = parseIGDServiceInfo( tree, *_rootDescData, m_logger );
+        if ( !svc )
+        {
+            return false;
+        }
+
         // Build SOAP request for GetSpecificPortMappingEntry
         std::string soap = "<?xml version=\"1.0\"?>"
                            "<s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\""
                            " s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\">"
                            "<s:Body>"
                            "<u:GetSpecificPortMappingEntry xmlns:u=\"" +
-                           tree.get<std::string>(
-                               "root.device.deviceList.device.deviceList.device.serviceList.service.serviceType" ) +
+                           svc->serviceType +
                            "\">"
                            "<NewRemoteHost></NewRemoteHost>"
                            "<NewExternalPort>" +
@@ -580,11 +698,7 @@ namespace sgns::upnp
                            "</s:Envelope>";
 
         // Add HTTP headers to SOAP body
-        auto soaprqwithhttp = AddHTTPtoSoap(
-            soap,
-            tree.get<std::string>( "root.device.deviceList.device.deviceList.device.serviceList.service.controlURL" ),
-            tree.get<std::string>( "root.device.deviceList.device.deviceList.device.serviceList.service.serviceType" ),
-            "#GetSpecificPortMappingEntry" );
+        auto soaprqwithhttp = AddHTTPtoSoap( soap, svc->controlURL, svc->serviceType, "#GetSpecificPortMappingEntry" );
 
         // Send SOAP request and get result
         std::string soapresponse;

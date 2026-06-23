@@ -1,0 +1,20 @@
+add_executable(upnp_parseurl_test upnp_parseurl_test.cpp)
+target_link_libraries(upnp_parseurl_test gnus_upnp GTest::gtest_main)
+add_test(NAME upnp_parseurl_test COMMAND upnp_parseurl_test)
+
+add_executable(upnp_ssdp_parse_test upnp_ssdp_parse_test.cpp)
+target_link_libraries(upnp_ssdp_parse_test gnus_upnp GTest::gtest_main)
+add_test(NAME upnp_ssdp_parse_test COMMAND upnp_ssdp_parse_test)
+
+add_executable(upnp_addhttptosoap_test upnp_addhttptosoap_test.cpp)
+target_link_libraries(upnp_addhttptosoap_test gnus_upnp GTest::gtest_main)
+add_test(NAME upnp_addhttptosoap_test COMMAND upnp_addhttptosoap_test)
+
+add_executable(upnp_serviceinfo_test upnp_serviceinfo_test.cpp)
+target_link_libraries(upnp_serviceinfo_test gnus_upnp GTest::gtest_main)
+add_test(NAME upnp_serviceinfo_test COMMAND upnp_serviceinfo_test)
+
+add_executable(upnp_rootdesc_test upnp_rootdesc_test.cpp)
+target_link_libraries(upnp_rootdesc_test gnus_upnp GTest::gtest_main)
+add_test(NAME upnp_rootdesc_test COMMAND upnp_rootdesc_test)
+include_directories(../include)

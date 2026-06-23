@@ -17,12 +17,20 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(BUILD_TESTS "Build unit tests" OFF)
+
+if(BUILD_TESTS)
+    find_package(GTest CONFIG REQUIRED)
+endif()
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(Boost REQUIRED COMPONENTS date_time filesystem random regex system thread log program_options)
 include_directories(${Boost_INCLUDE_DIRS})
 
 add_subdirectory(src)
+if(BUILD_TESTS)
+    add_subdirectory(test)
+endif()
 
 install(
     DIRECTORY "${CMAKE_SOURCE_DIR}/include/"
