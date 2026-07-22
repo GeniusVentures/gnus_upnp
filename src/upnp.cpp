@@ -204,7 +204,7 @@ namespace sgns::upnp
                             self->socket_->async_receive_from(
                                 head_begin,
                                 *remote_endpoint,
-                                [self, headerbuff, local_endpoint, timer](
+                                [self, headerbuff, remote_endpoint, local_endpoint, timer](
                                     const boost::system::error_code &receive_error,
                                     size_t                           bytes_received )
                                 {
