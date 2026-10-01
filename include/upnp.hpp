@@ -18,16 +18,13 @@ namespace sgns::upnp
     class UPNP : public std::enable_shared_from_this<UPNP>
     {
     public:
-        UPNP() :
-            _ioc( std::make_shared<boost::asio::io_context>() ),
-            _multicast( boost::asio::ip::address_v4( { 239, 255, 255, 250 } ), 1900 ),
-            _rootDescXML( std::make_shared<std::vector<IGDInfo>>() ),
-            _rootDescData( std::make_shared<std::string>() ),
-            _bindIp( std::make_shared<std::string>() ),
-            _controlPort( 0 ),
-            socket_( std::make_shared<boost::asio::ip::udp::socket>( *_ioc ) )
-        {
-        }
+        /** Canonical factory. Every method captures shared_from_this(), so an
+		* instance must be owned by a shared_ptr before any call; plain or
+		* stack construction makes those calls throw std::bad_weak_ptr. The
+		* constructor is private to enforce this.
+		* @return shared ownership of a new UPNP instance
+		*/
+        static std::shared_ptr<UPNP> New();
 
         struct IGDInfo
         {
@@ -66,6 +63,17 @@ namespace sgns::upnp
         bool CheckIfPortInUse( int extPort, const std::string &protocol, std::string &outInternalClient );
 
     private:
+        UPNP() :
+            _ioc( std::make_shared<boost::asio::io_context>() ),
+            _multicast( boost::asio::ip::address_v4( { 239, 255, 255, 250 } ), 1900 ),
+            _rootDescXML( std::make_shared<std::vector<IGDInfo>>() ),
+            _rootDescData( std::make_shared<std::string>() ),
+            _bindIp( std::make_shared<std::string>() ),
+            _controlPort( 0 ),
+            socket_( std::make_shared<boost::asio::ip::udp::socket>( *_ioc ) )
+        {
+        }
+
         /** Parse IGD data, currently only concerns itself with getting the rootDesc XML location
 		* @param lines - var to store XML URL
 		* @return false on failure

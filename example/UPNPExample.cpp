@@ -3,7 +3,7 @@
 #include <boost/asio/error.hpp>
 
 void upnp_task(int thread_id) {
-    auto upnp = std::make_shared<sgns::upnp::UPNP>();
+    auto upnp = sgns::upnp::UPNP::New();
 
     std::cout << "Thread " << thread_id << " calling GetIGD()" << std::endl;
     auto gotIGD = upnp->GetIGD();

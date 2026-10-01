@@ -20,6 +20,13 @@
 
 namespace sgns::upnp
 {
+    // make_shared cannot reach the private constructor, so ownership is taken
+    // here, inside the class's own access.
+    std::shared_ptr<UPNP> UPNP::New()
+    {
+        return std::shared_ptr<UPNP>( new UPNP() );
+    }
+
     std::vector<std::string> GetLocalIPv4CandidatesFromOS()
     {
         std::vector<std::string> candidates;
